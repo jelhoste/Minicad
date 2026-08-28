@@ -1,0 +1,2369 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+<title>MiniCAD</title>
+<meta name="theme-color" content="#14181f" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<link rel="manifest" href="manifest.json" />
+<link rel="icon" href="icons/icon-192.png" />
+<link rel="apple-touch-icon" href="icons/icon-192.png" />
+
+<style>
+  :root{
+    --bg:#14181f; --bg2:#1b212b; --panel:#1e2530; --line:#2a3341;
+    --accent:#4fd1c5; --accent-dim:#2b6f68; --danger:#e0665a; --text:#e7ecf2; --text-dim:#8b98ab;
+    --btn:#232b38; --btn-active:#2b6f68;
+    --safe-top: env(safe-area-inset-top); --safe-bottom: env(safe-area-inset-bottom);
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  html,body{height:100%; width:100%; margin:0; overscroll-behavior:none;}
+  html{
+    /* Disables Chrome's automatic text-size adjustment ("font boosting"),
+       which can mis-fire and shrink text after a dynamic layout change like
+       toggling the side panel — a known, distinct cause from viewport sizing. */
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
+  body{
+    background:var(--bg); color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+    display:flex; flex-direction:column; overflow:hidden;
+    height:100dvh; height:var(--app-height, 100dvh);
+    width:100vw; width:var(--app-width, 100vw);
+    user-select:none; position:relative;
+  }
+
+  header#toolbar{
+    display:flex; align-items:center; gap:6px; padding:8px 8px calc(8px);
+    padding-top:calc(8px + var(--safe-top));
+    background:var(--bg2); border-bottom:1px solid var(--line);
+    overflow-x:auto; white-space:nowrap; scrollbar-width:none; flex-shrink:0;
+  }
+  header#toolbar::-webkit-scrollbar{display:none;}
+  .brand{ font-weight:700; letter-spacing:.5px; color:var(--accent); padding:0 8px 0 4px; font-size:15px; flex-shrink:0;}
+  .sep{ width:1px; align-self:stretch; background:var(--line); margin:2px 4px; flex-shrink:0;}
+
+  button.tool{
+    flex-shrink:0; border:1px solid var(--line); background:var(--btn); color:var(--text);
+    border-radius:10px; padding:9px 12px; font-size:13px; display:flex; align-items:center; gap:6px;
+    min-height:40px;
+  }
+  button.tool:active{ background:var(--accent-dim); }
+  button.tool.active{ background:var(--btn-active); border-color:var(--accent); color:#fff; }
+  button.tool.danger{ color:var(--danger); }
+  button.tool:disabled{ opacity:.35; }
+  select.tool{
+    flex-shrink:0; border:1px solid var(--line); background:var(--btn); color:var(--text);
+    border-radius:10px; padding:9px 8px; font-size:13px; min-height:40px;
+  }
+
+  button.menu-btn.open{ background:var(--btn-active); border-color:var(--accent); }
+
+  .dropdown{
+    display:none; position:absolute; left:8px; top:calc(56px + var(--safe-top)); z-index:20;
+    background:var(--panel); border:1px solid var(--accent); border-radius:12px;
+    padding:10px; box-shadow:0 8px 24px rgba(0,0,0,.45); max-width:calc(100vw - 16px);
+  }
+  .dropdown.show{ display:block; }
+  .dropdown .dd-label{ font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--text-dim); margin:6px 4px 4px; }
+  .dropdown .dd-label:first-child{ margin-top:0; }
+  .dropdown .dd-row{ display:flex; gap:8px; flex-wrap:wrap; }
+
+  #main{ flex:1; display:flex; min-height:0; position:relative; }
+
+  #viewport-wrap{ flex:1; position:relative; min-width:0; }
+  #viewport, #sketch-canvas{ position:absolute; inset:0; width:100%; height:100%; display:block; touch-action:none; }
+  #sketch-canvas{ display:none; }
+
+  #hint{
+    position:absolute; left:10px; bottom:10px; z-index:5;
+    background:rgba(20,24,31,.85); border:1px solid var(--line); border-radius:10px;
+    padding:8px 12px; font-size:12.5px; color:var(--text-dim); max-width:min(70vw,420px);
+    pointer-events:none;
+  }
+
+  #constraint-panel{
+    display:none; position:absolute; left:10px; right:10px; bottom:56px; z-index:6;
+    background:rgba(20,24,31,.95); border:1px solid var(--accent); border-radius:12px;
+    padding:10px 12px; max-width:520px;
+  }
+  #constraint-panel.show{ display:block; }
+  #constraint-panel .cp-info{ font-size:12px; color:var(--text-dim); margin-bottom:8px; }
+  #constraint-panel .cp-row{ display:flex; gap:8px; flex-wrap:wrap; }
+  #constraint-panel .cp-hint{ font-size:12.5px; color:var(--text-dim); }
+  #constraint-panel .cp-clear{ margin-top:8px; background:var(--btn); color:var(--text-dim); }
+  #constraint-panel .cp-list{ margin-top:10px; padding-top:10px; border-top:1px solid var(--line); max-height:26vh; overflow-y:auto; }
+  #constraint-panel .cp-list-row{ display:flex; align-items:center; gap:6px; padding:4px 0; }
+  #constraint-panel .cp-list-label{ flex:1; font-size:12.5px; color:var(--text); }
+  #constraint-panel .cp-val-input{
+    width:64px; background:var(--bg2); border:1px solid var(--line); color:var(--text);
+    border-radius:6px; padding:5px 6px; font-size:12.5px;
+  }
+  #constraint-panel .cp-list-row button{ padding:5px 9px; font-size:12.5px; min-height:auto; }
+
+  #dim-input{
+    position:absolute; left:50%; top:14px; transform:translateX(-50%); z-index:6;
+    background:var(--panel); border:1px solid var(--accent); border-radius:12px;
+    padding:10px 12px; display:none; gap:8px; align-items:center; box-shadow:0 6px 20px rgba(0,0,0,.4);
+  }
+  #dim-input.show{ display:flex; }
+  #dim-input label{ font-size:12px; color:var(--text-dim); }
+  #dim-input input{
+    width:84px; background:var(--bg2); border:1px solid var(--line); color:var(--text);
+    border-radius:8px; padding:8px; font-size:14px;
+  }
+  #dim-input button{
+    border:none; background:var(--accent); color:#0a1210; font-weight:700;
+    border-radius:8px; padding:8px 12px; font-size:13px;
+  }
+  #dim-input button.cancel{ background:var(--btn); color:var(--text); }
+
+  #plane-choice{
+    position:absolute; left:50%; top:14px; transform:translateX(-50%); z-index:6;
+    background:var(--panel); border:1px solid var(--accent); border-radius:12px;
+    padding:12px 14px; display:none; flex-direction:column; gap:10px; box-shadow:0 6px 20px rgba(0,0,0,.4);
+  }
+  #plane-choice.show{ display:flex; }
+  #plane-choice .pc-title{ font-size:13px; color:var(--text-dim); text-align:center; }
+  #plane-choice .pc-row{ display:flex; gap:8px; flex-wrap:wrap; justify-content:center; }
+  #plane-choice button.cancel{ background:var(--btn); color:var(--text); }
+
+  #extrude-modal{
+    position:absolute; left:50%; top:14px; transform:translateX(-50%); z-index:6;
+    background:var(--panel); border:1px solid var(--accent); border-radius:12px;
+    padding:12px 14px; display:none; flex-direction:column; gap:10px; box-shadow:0 6px 20px rgba(0,0,0,.4);
+    max-width:min(92vw, 420px);
+  }
+  #extrude-modal.show{ display:flex; }
+  #extrude-modal .pc-title{ font-size:13px; color:var(--text-dim); text-align:center; }
+  #extrude-modal .pc-row{ display:flex; gap:8px; flex-wrap:wrap; justify-content:center; }
+  #extrude-modal button.cancel{ background:var(--btn); color:var(--text); align-self:center; }
+  #extrude-modal .em-row{ display:flex; align-items:center; gap:10px; justify-content:center; }
+  #extrude-modal .em-row label{ font-size:12px; color:var(--text-dim); }
+  #extrude-modal .em-row input{
+    width:100px; background:var(--bg2); border:1px solid var(--line); color:var(--text);
+    border-radius:8px; padding:8px; font-size:14px;
+  }
+
+  #face-confirm{
+    position:absolute; left:50%; top:14px; transform:translateX(-50%); z-index:6;
+    background:var(--panel); border:1px solid var(--accent); border-radius:12px;
+    padding:12px 14px; display:none; flex-direction:column; gap:10px; box-shadow:0 6px 20px rgba(0,0,0,.4);
+  }
+  #face-confirm.show{ display:flex; }
+  #face-confirm .pc-title{ font-size:13px; color:var(--text-dim); text-align:center; }
+  #face-confirm .pc-row{ display:flex; gap:8px; flex-wrap:wrap; justify-content:center; }
+  #face-confirm button.cancel{ background:var(--btn); color:var(--text); }
+
+  body.picking-face #viewport{ cursor:crosshair; }
+  body.picking-face #toolbar{ opacity:.35; pointer-events:none; }
+
+  #panel{
+    width:230px; flex-shrink:0; background:var(--panel); border-left:1px solid var(--line);
+    display:flex; flex-direction:column; transform:translateX(0); transition:transform .2s ease;
+  }
+  #panel.hidden{ transform:translateX(100%); position:absolute; right:0; top:0; bottom:0; }
+
+  #panel-tabs{ display:flex; gap:4px; padding:8px 8px 0; flex-shrink:0; }
+  #panel-tabs .ptab{
+    flex:1; background:var(--btn); border:1px solid var(--line); color:var(--text-dim);
+    border-radius:8px 8px 0 0; padding:8px 4px; font-size:11.5px; min-height:auto;
+  }
+  #panel-tabs .ptab.active{ background:var(--panel); color:var(--accent); border-bottom-color:var(--panel); }
+
+  #panel-body{ flex:1; min-height:0; display:flex; flex-direction:column; border-top:1px solid var(--line); }
+  .panel-section{ display:none; flex:1; min-height:0; flex-direction:column; padding-top:8px; }
+  .panel-section.active{ display:flex; }
+
+  #obj-list{ list-style:none; margin:0; padding:0 8px; overflow-y:auto; flex:1; }
+  #obj-list li{
+    display:flex; align-items:center; gap:6px; padding:8px 8px; border-radius:8px; margin-bottom:4px;
+    background:var(--bg2); font-size:13px; border:1px solid transparent;
+  }
+  #obj-list li.selected{ border-color:var(--accent); background:var(--accent-dim); }
+  #obj-list li .name{ flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  #obj-list li button{ background:none; border:none; color:var(--text-dim); font-size:15px; padding:2px 4px; }
+  #obj-list li button.vis-off{ opacity:.4; }
+  #obj-list .empty{ color:var(--text-dim); font-size:12px; padding:8px; }
+
+  #history-list{ list-style:none; margin:0; padding:0 8px; overflow-y:auto; flex:1; }
+  #history-list li{
+    padding:7px 8px; border-radius:8px; margin-bottom:3px; background:var(--bg2);
+    font-size:12px; color:var(--text); line-height:1.35;
+  }
+  #history-list li.empty{ color:var(--text-dim); background:none; padding:8px; }
+  #history-list li .h-time{ color:var(--text-dim); font-size:10.5px; display:block; margin-top:1px; }
+
+  #prop-content{ padding:12px; flex:1; overflow-y:auto; }
+  #prop-content.prop-empty{ color:var(--text-dim); font-size:12px; }
+  .prop-label{ font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--text-dim); margin:10px 0 6px; }
+  .prop-label:first-child{ margin-top:0; }
+  .prop-row{ display:flex; align-items:center; gap:8px; margin-bottom:6px; }
+  .prop-row .prop-key{ width:70px; flex-shrink:0; font-size:12.5px; color:var(--text-dim); }
+  .prop-row input{
+    flex:1; min-width:0; background:var(--bg2); border:1px solid var(--line); color:var(--text);
+    border-radius:8px; padding:6px 8px; font-size:13px;
+  }
+
+  #prop-dropdown{
+    display:none; position:fixed; z-index:25; max-height:50vh; overflow-y:auto;
+    background:var(--panel); border:1px solid var(--accent); border-top:none;
+    border-radius:0 0 12px 12px; box-shadow:0 10px 26px rgba(0,0,0,.5);
+  }
+  #prop-dropdown.show{ display:block; }
+
+  body.sketching #toolbar{ opacity:.35; pointer-events:none; }
+
+  #sketch-toolbar{
+    display:none; align-items:center; gap:6px; padding:8px; background:var(--bg2);
+    border-bottom:1px solid var(--line); overflow-x:auto; white-space:nowrap; flex-shrink:0;
+  }
+  #sketch-toolbar.show{ display:flex; }
+  #sketch-toolbar::-webkit-scrollbar{ display:none; }
+
+  #panel-toggle{
+    position:absolute; right:8px; top:8px; z-index:6; border:1px solid var(--line);
+    background:var(--btn); color:var(--text); border-radius:10px; padding:8px 10px; font-size:13px;
+  }
+
+  footer#statusbar{
+    flex-shrink:0; background:var(--bg2); border-top:1px solid var(--line); color:var(--text-dim);
+    font-size:11.5px; padding:5px 10px calc(5px + var(--safe-bottom));
+    display:flex; justify-content:space-between; gap:8px;
+  }
+  .gcs-status{ flex-shrink:0; }
+  .gcs-status.loading{ color:var(--text-dim); }
+  .gcs-status.ready{ color:var(--accent); }
+  .gcs-status.error{ color:var(--danger); }
+
+  @media (max-width:640px){
+    #panel{ width:78vw; max-width:300px; }
+  }
+</style>
+</head>
+<body>
+
+<header id="toolbar">
+  <span class="brand">MiniCAD</span>
+  <div class="sep"></div>
+
+  <button class="tool menu-btn" id="menu-btn-add" data-menu="add">➕ Ajouter ▾</button>
+  <button class="tool menu-btn" id="menu-btn-transform" data-menu="transform">✥ Transformer ▾</button>
+  <button class="tool menu-btn" id="menu-btn-bool" data-menu="bool">⚙ Booléen ▾</button>
+  <button class="tool menu-btn" id="menu-btn-file" data-menu="file">⋯ Fichier ▾</button>
+  <div class="sep"></div>
+
+  <button class="tool" id="btn-fit">🎯 Cadrer</button>
+  <button class="tool danger" id="btn-delete" title="Supprimer">🗑</button>
+</header>
+
+<div id="dropdown-add" class="dropdown">
+  <div class="dd-label">Primitives</div>
+  <div class="dd-row">
+    <button class="tool" id="add-box">🧊 Cube</button>
+    <button class="tool" id="add-cylinder">🥫 Cylindre</button>
+    <button class="tool" id="add-sphere">🔵 Sphère</button>
+    <button class="tool" id="add-cone">🔺 Cône</button>
+  </div>
+  <div class="dd-label">Esquisse</div>
+  <div class="dd-row">
+    <button class="tool" id="btn-sketch">✏️ Esquisse (plan)</button>
+    <button class="tool" id="btn-sketch-face">👆 Esquisse sur face</button>
+  </div>
+</div>
+
+<div id="dropdown-transform" class="dropdown">
+  <div class="dd-row">
+    <button class="tool" id="btn-move">✥ Déplacer</button>
+    <button class="tool" id="btn-rotate">⟳ Tourner</button>
+    <button class="tool" id="btn-scale">⤢ Échelle</button>
+  </div>
+</div>
+
+<div id="dropdown-bool" class="dropdown">
+  <div class="dd-label">Entre deux objets sélectionnés au doigt</div>
+  <div class="dd-row">
+    <button class="tool" id="btn-union">⊕ Union</button>
+    <button class="tool" id="btn-subtract">⊖ Soustraction</button>
+    <button class="tool" id="btn-intersect">⊗ Intersection</button>
+  </div>
+</div>
+
+<div id="dropdown-file" class="dropdown">
+  <div class="dd-row">
+    <button class="tool" id="btn-export">⬇ Export STL</button>
+    <button class="tool" id="btn-save">💾 Sauver</button>
+    <button class="tool" id="btn-load">📂 Charger</button>
+    <button class="tool danger" id="btn-new">✕ Nouveau</button>
+  </div>
+</div>
+
+
+
+<div id="sketch-toolbar">
+  <button class="tool menu-btn" id="sk-menu-draw" data-skmenu="draw">✏️ Ligne ▾</button>
+  <button class="tool menu-btn" id="sk-menu-actions" data-skmenu="actions">⚡ Actions ▾</button>
+  <button class="tool menu-btn" id="sk-menu-grid" data-skmenu="grid">🧲 Grille ▾</button>
+  <div class="sep"></div>
+  <button class="tool" id="sk-extrude">⬆ Extrusion / Perçage</button>
+  <button class="tool" id="sk-revolve">🌀 Révolution</button>
+  <div class="sep"></div>
+  <button class="tool danger" id="sk-exit">✕ Quitter</button>
+</div>
+
+<div id="sk-dropdown-draw" class="dropdown sk-dropdown">
+  <div class="dd-row">
+    <button class="tool active" id="sk-line">📈 Ligne</button>
+    <button class="tool" id="sk-rect">▭ Rectangle</button>
+    <button class="tool" id="sk-circle">◯ Cercle</button>
+  </div>
+  <div class="dd-row">
+    <button class="tool" id="sk-edit">✥ Éditer</button>
+    <button class="tool" id="sk-constrain">🔗 Contraintes</button>
+  </div>
+</div>
+
+<div id="sk-dropdown-actions" class="dropdown sk-dropdown">
+  <div class="dd-row">
+    <button class="tool" id="sk-finish">✔ Fermer</button>
+    <button class="tool" id="sk-undo">↺ Annuler point</button>
+  </div>
+</div>
+
+<div id="sk-dropdown-grid" class="dropdown sk-dropdown">
+  <div class="dd-row">
+    <button class="tool active" id="sk-snap">🧲 Accrochage</button>
+    <select id="sk-gridstep" class="tool">
+      <option value="0.1">Pas 0.1</option>
+      <option value="0.25">Pas 0.25</option>
+      <option value="0.5" selected>Pas 0.5</option>
+      <option value="1">Pas 1</option>
+      <option value="2">Pas 2</option>
+    </select>
+  </div>
+  <div class="dd-row">
+    <button class="tool active" id="sk-dims">📏 Cotes</button>
+  </div>
+</div>
+
+<div id="main">
+  <div id="viewport-wrap">
+    <canvas id="viewport"></canvas>
+    <canvas id="sketch-canvas"></canvas>
+    <div id="hint"></div>
+    <div id="constraint-panel"></div>
+
+
+    <div id="plane-choice">
+      <div class="pc-title">Sur quel plan esquisser ?</div>
+      <div class="pc-row">
+        <button class="tool" id="pc-ground">⬜ Sol (XZ)</button>
+        <button class="tool" id="pc-front">🧱 Face avant (XY)</button>
+        <button class="tool" id="pc-side">📐 Profil (YZ)</button>
+        <button class="tool cancel" id="pc-cancel">Annuler</button>
+      </div>
+    </div>
+
+    <div id="extrude-modal">
+      <div class="pc-title" id="em-title">Extrusion / Perçage</div>
+      <div class="em-row">
+        <label id="em-label">Profondeur</label>
+        <input id="em-value" type="number" inputmode="decimal" value="1" step="0.1" />
+      </div>
+      <div class="pc-row" id="em-intent-row">
+        <button class="tool" id="em-add">➕ Ajouter matière</button>
+        <button class="tool" id="em-cut">➖ Creuser (perçage)</button>
+        <button class="tool" id="em-separate">◻ Objet séparé</button>
+      </div>
+      <div class="pc-row" id="em-simple-row">
+        <button class="tool" id="em-confirm">✓ Confirmer</button>
+      </div>
+      <button class="tool cancel" id="em-cancel">Annuler</button>
+    </div>
+
+    <div id="face-confirm">
+      <div class="pc-title">Esquisser sur cette face ?</div>
+      <div class="pc-row">
+        <button class="tool" id="fc-ok">✓ Esquisser ici</button>
+        <button class="tool" id="fc-other">↺ Autre face</button>
+        <button class="tool cancel" id="fc-cancel">✕ Annuler</button>
+      </div>
+    </div>
+
+
+    <div id="dim-input">
+      <label id="dim-label">Profondeur</label>
+      <input id="dim-value" type="number" inputmode="decimal" value="1" step="0.1" />
+      <button id="dim-ok">OK</button>
+      <button id="dim-cancel" class="cancel">Annuler</button>
+    </div>
+
+    <button id="panel-toggle">📋 Objets</button>
+  </div>
+
+  <aside id="panel">
+    <div id="panel-tabs">
+      <button class="ptab active" id="ptab-objects" data-tab="objects">Objets</button>
+      <button class="ptab" id="ptab-history" data-tab="history">Historique</button>
+      <button class="ptab menu-btn" id="ptab-props-toggle">Propriétés ▾</button>
+    </div>
+    <div id="prop-dropdown" class="dropdown">
+      <div id="prop-content" class="prop-empty">Sélectionnez un objet</div>
+    </div>
+    <div id="panel-body">
+      <div id="tab-objects" class="panel-section active">
+        <ul id="obj-list"><li class="empty">Aucun objet</li></ul>
+      </div>
+      <div id="tab-history" class="panel-section">
+        <ul id="history-list"><li class="empty">Aucune action pour l'instant</li></ul>
+      </div>
+    </div>
+  </aside>
+</div>
+
+<footer id="statusbar">
+  <span id="status-left">Mode modélisation</span>
+  <span id="gcs-status" class="gcs-status loading">⏳ Solveur…</span>
+  <span id="status-right">0 objet(s)</span>
+</footer>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.173.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.173.0/examples/jsm/",
+    "three-mesh-bvh": "https://cdn.jsdelivr.net/npm/three-mesh-bvh@0.9.3/build/index.module.js",
+    "three-bvh-csg": "https://cdn.jsdelivr.net/npm/three-bvh-csg@0.0.16/build/index.module.js",
+    "@salusoft89/planegcs": "https://cdn.jsdelivr.net/npm/@salusoft89/planegcs@1.1.7/dist/index.js"
+  }
+}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { TransformControls } from 'three/addons/controls/TransformControls.js';
+import { STLExporter } from 'three/addons/exporters/STLExporter.js';
+import { mergeGeometries as mergeGeoms } from 'three/addons/utils/BufferGeometryUtils.js';
+import { ADDITION, SUBTRACTION, INTERSECTION, Brush, Evaluator } from 'three-bvh-csg';
+import { make_gcs_wrapper, SolveStatus } from '@salusoft89/planegcs';
+
+// ---------------------------------------------------------------------------
+// Global state
+// ---------------------------------------------------------------------------
+let scene, camera, sketchCamera, activeCamera, renderer, controls, transformControls;
+let viewportEl, sketchEl, sketchCtx;
+let worldGrid, worldAxes;
+let objects = [];              // { id, name, mesh }
+let selected = null;           // reference into objects[]
+let historyLog = [];           // { text, t } — running log of modeling actions, most recent first
+let idCounter = 1;
+
+let mode = 'model';            // 'model' | 'sketch'
+let pendingBoolean = null;     // 'union' | 'subtract' | 'intersect' while picking targets
+let booleanFirst = null;
+let pickingFace = false;       // true while waiting for a tap on a face to sketch on
+
+// -- Geometric constraint solver (planegcs, FreeCAD's solver compiled to WASM) --
+let gcsWrapper = null;
+let gcsStatus = 'loading';     // 'loading' | 'ready' | 'error'
+
+// Sketch state: sketching happens on an arbitrary 3D plane (origin + 2 in-plane axes + normal),
+// not just the world XY plane. This lets us sketch on the ground, or on any flat face of a solid.
+//
+// Geometry is modeled as proper entities (points/lines/circles with stable ids), not raw point
+// arrays, so that constraints (which reference entities by id) can be attached and solved live.
+const GRID_STEPS = [0.1, 0.25, 0.5, 1, 2];
+const sketch = {
+  tool: 'line',
+  entities: new Map(),      // id -> {id, type:'point'|'line'|'circle', ...}
+  constraints: new Map(),   // id -> planegcs constraint primitive
+  nextId: 1,
+  currentPointIds: [],      // in-progress polyline: ordered point entity ids
+  shapes: [],               // finished closed shapes: {kind:'polygon', pointIds:[]} | {kind:'circle', circleId}
+  selection: [],            // for the "Contraintes" tool: [{kind:'point'|'line'|'circle', id}]
+  editDragId: null,         // point id currently being dragged by the "Éditer" tool
+  editingEntry: null,       // object entry being re-edited (its sketch was reopened), or null
+  refLineId: null,          // hidden fixed horizontal reference line, for "angle to horizontal" constraints
+  showDimensions: true,     // whether length/radius annotations ("cotes") are drawn
+  dimHitboxes: [],          // screen hitboxes for the current frame's dimension labels, for tap detection
+  dragStart: null,
+  dragCurrent: null,
+  hoverPoint: null,
+  snap: true,
+  gridStep: 0.5,
+  plane: null,      // { origin: Vector3, normal, xAxis, yAxis, plane: THREE.Plane, parentEntry }
+};
+
+const evaluator = new Evaluator();
+const raycaster = new THREE.Raycaster();
+const pointerNDC = new THREE.Vector2();
+const _v3a = new THREE.Vector3();
+const _v3b = new THREE.Vector3();
+
+// ---------------------------------------------------------------------------
+// Boot
+// ---------------------------------------------------------------------------
+// Drives the actual page size from JS instead of trusting `100dvh`/`100vw`
+// alone — on Android Chrome (and especially inside this content:// file
+// viewer), those viewport units can get stuck at a stale value after certain
+// in-page interactions (observed after collapsing/expanding the side panel),
+// leaving the whole app confined to a shrunk box instead of filling the screen.
+//
+// Deliberately uses window.innerWidth/innerHeight (the *layout* viewport, in
+// CSS px at the current zoom level) rather than visualViewport.width/height
+// (the *visual* viewport, which shrinks when the page is pinch-zoomed in).
+// Locking body's size to visualViewport caused a compounding-zoom bug: if the
+// visual viewport ever briefly reported a zoomed-in (smaller) size, body got
+// force-fit into that smaller box, and everything inside — text, buttons —
+// rendered correspondingly tiny even though the layout stayed internally
+// consistent (nothing looked broken/blank, just uniformly shrunk).
+function syncAppSize() {
+  document.documentElement.style.setProperty('--app-height', window.innerHeight + 'px');
+  document.documentElement.style.setProperty('--app-width', window.innerWidth + 'px');
+}
+
+init3D();
+initSketchCanvas();
+initUI();
+syncAppSize();
+window.addEventListener('resize', () => { syncAppSize(); onResize(); });
+// Mobile browsers often hide/show their address bar without firing a plain
+// 'resize' event; visualViewport catches those cases too — used here only as
+// a trigger signal, not as the source of the actual size values (see above).
+if (window.visualViewport) {
+  window.visualViewport.addEventListener('resize', () => {
+    syncAppSize();
+    requestAnimationFrame(onResize);
+  });
+}
+onResize();
+animate();
+initGcs();
+
+// ---------------------------------------------------------------------------
+// Constraint solver init (planegcs — FreeCAD's solver, compiled to WebAssembly)
+// ---------------------------------------------------------------------------
+async function initGcs() {
+  try {
+    const wasmUrl = 'https://cdn.jsdelivr.net/npm/@salusoft89/planegcs@1.1.7/dist/planegcs_dist/planegcs.wasm';
+    gcsWrapper = await make_gcs_wrapper(wasmUrl);
+    gcsStatus = 'ready';
+  } catch (err) {
+    console.error('planegcs load failed', err);
+    gcsStatus = 'error';
+  }
+  updateGcsStatusUI();
+}
+
+function updateGcsStatusUI() {
+  const el = document.getElementById('gcs-status');
+  if (!el) return;
+  if (gcsStatus === 'loading') { el.textContent = '⏳ Solveur…'; el.className = 'gcs-status loading'; }
+  else if (gcsStatus === 'ready') { el.textContent = '✓ Solveur prêt'; el.className = 'gcs-status ready'; }
+  else { el.textContent = '⚠ Solveur indisponible'; el.className = 'gcs-status error'; }
+}
+
+// ---------------------------------------------------------------------------
+// 3D setup
+// ---------------------------------------------------------------------------
+function init3D() {
+  viewportEl = document.getElementById('viewport');
+
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x14181f);
+
+  camera = new THREE.PerspectiveCamera(50, 1, 0.01, 1000);
+  camera.position.set(4.5, 3.5, 5.5);
+  activeCamera = camera;
+
+  // Dedicated orthographic camera used while sketching: automatically framed
+  // to look straight at the sketch plane, so the grid is never skewed/distorted.
+  sketchCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.01, 2000);
+
+  renderer = new THREE.WebGLRenderer({ canvas: viewportEl, antialias: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+
+  const hemi = new THREE.HemisphereLight(0xffffff, 0x30323a, 1.1);
+  scene.add(hemi);
+  const dir = new THREE.DirectionalLight(0xffffff, 1.1);
+  dir.position.set(5, 8, 6);
+  scene.add(dir);
+
+  worldGrid = new THREE.GridHelper(20, 20, 0x3a4556, 0x232b38);
+  scene.add(worldGrid);
+  worldAxes = new THREE.AxesHelper(1.2);
+  scene.add(worldAxes);
+
+  controls = new OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.12;
+  controls.touches = { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN };
+  controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN };
+
+  transformControls = new TransformControls(camera, renderer.domElement);
+  transformControls.addEventListener('dragging-changed', (e) => { controls.enabled = !e.value; });
+  transformControls.addEventListener('objectChange', () => {
+    // Keep the Position fields live while dragging the gizmo, without a full
+    // panel rebuild (which would drop focus / feel jittery mid-drag).
+    if (!selected) return;
+    const el = document.getElementById('prop-content');
+    if (!el) return;
+    const inputs = el.querySelectorAll('.prop-row input');
+    const posInputs = Array.from(inputs).slice(-3);
+    ['x', 'y', 'z'].forEach((axis, i) => {
+      if (posInputs[i] && document.activeElement !== posInputs[i]) {
+        posInputs[i].value = Math.round(selected.mesh.position[axis] * 100) / 100;
+      }
+    });
+  });
+  scene.add(transformControls.getHelper ? transformControls.getHelper() : transformControls);
+
+  // Tap-to-select (distinguish from orbit drag by movement distance)
+  let downPos = null, downTime = 0;
+  renderer.domElement.addEventListener('pointerdown', (e) => {
+    downPos = { x: e.clientX, y: e.clientY };
+    downTime = performance.now();
+  });
+  renderer.domElement.addEventListener('pointerup', (e) => {
+    if (mode !== 'model' || !downPos) return;
+    const dx = e.clientX - downPos.x, dy = e.clientY - downPos.y;
+    const dist = Math.hypot(dx, dy);
+    const dt = performance.now() - downTime;
+    if (dist < 8 && dt < 500) pickObject(e);
+    downPos = null;
+  });
+}
+
+function pickObject(e) {
+  const rect = renderer.domElement.getBoundingClientRect();
+  pointerNDC.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+  pointerNDC.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+  raycaster.setFromCamera(pointerNDC, camera);
+  const meshes = objects.filter(o => o.mesh.visible).map(o => o.mesh);
+  const hits = raycaster.intersectObjects(meshes, false);
+
+  if (pickingFace) {
+    if (hits.length) handleFacePick(hits[0]);
+    else flashHint('Touchez une face d\'un objet.');
+    return;
+  }
+
+  if (hits.length) {
+    const hitObj = objects.find(o => o.mesh === hits[0].object);
+    if (pendingBoolean) {
+      handleBooleanPick(hitObj);
+    } else {
+      selectObject(hitObj);
+    }
+  } else if (!pendingBoolean) {
+    selectObject(null);
+  }
+}
+
+function animate() {
+  requestAnimationFrame(animate);
+  controls.update();
+  renderer.render(scene, activeCamera);
+}
+
+// Frames the selected object (or the whole scene if nothing is selected) so
+// it fills the viewport: recenters the orbit target and moves the camera
+// along its current viewing direction to the right distance.
+function fitView() {
+  const targets = selected ? [selected.mesh] : objects.filter(o => o.mesh.visible).map(o => o.mesh);
+  if (!targets.length) { flashHint('Rien à cadrer.'); return; }
+  const box = new THREE.Box3();
+  targets.forEach(m => box.expandByObject(m));
+  if (box.isEmpty()) return;
+  const sphere = new THREE.Sphere();
+  box.getBoundingSphere(sphere);
+  const center = sphere.center;
+  const radius = Math.max(sphere.radius, 0.3);
+
+  const fovV = THREE.MathUtils.degToRad(camera.fov);
+  const fovH = 2 * Math.atan(Math.tan(fovV / 2) * camera.aspect);
+  const dist = Math.max(radius / Math.sin(fovV / 2), radius / Math.sin(fovH / 2)) * 1.2;
+
+  let dir = camera.position.clone().sub(controls.target);
+  if (dir.lengthSq() < 1e-6) dir.set(1, 0.75, 1);
+  dir.normalize();
+
+  camera.position.copy(center).addScaledVector(dir, dist);
+  controls.target.copy(center);
+  camera.near = Math.max(0.01, dist - radius * 4);
+  camera.far = dist + radius * 4 + 100;
+  camera.updateProjectionMatrix();
+  controls.update();
+}
+
+function onResize() {
+  const wrap = document.getElementById('viewport-wrap');
+  const w = wrap.clientWidth, h = wrap.clientHeight;
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+  renderer.setSize(w, h);
+  if (mode === 'sketch' && sketch.plane) updateSketchCameraFrustum();
+  resizeSketchCanvas();
+}
+
+// ---------------------------------------------------------------------------
+// Object management
+// ---------------------------------------------------------------------------
+function makeMaterial() {
+  return new THREE.MeshStandardMaterial({ color: 0x7fb5ff, metalness: 0.15, roughness: 0.55 });
+}
+
+function registerObject(mesh, name) {
+  mesh.userData.objId = idCounter;
+  const entry = { id: idCounter, name, mesh };
+  idCounter++;
+  objects.push(entry);
+  scene.add(mesh);
+  renderObjectList();
+  selectObject(entry);
+  return entry;
+}
+
+function addPrimitive(type) {
+  let params;
+  if (type === 'box') params = { w: 1, h: 1, d: 1 };
+  else if (type === 'cylinder') params = { r: 0.5, h: 1 };
+  else if (type === 'sphere') params = { r: 0.6 };
+  else if (type === 'cone') params = { r: 0.6, h: 1 };
+  else return;
+  const geo = buildPrimitiveGeometry(type, params);
+  const mesh = new THREE.Mesh(geo, makeMaterial());
+  mesh.userData.primType = type;
+  mesh.userData.primParams = params;
+  const entry = registerObject(mesh, prettyName(type));
+  logHistory(`Primitive créée : « ${entry.name} »`);
+}
+
+// Builds (or rebuilds) a primitive's geometry from its type + params, always
+// sitting on the ground plane (base at y=0) the same way it did at creation.
+function buildPrimitiveGeometry(type, p) {
+  let geo, liftY;
+  if (type === 'box') { geo = new THREE.BoxGeometry(p.w, p.h, p.d); liftY = p.h / 2; }
+  else if (type === 'cylinder') { geo = new THREE.CylinderGeometry(p.r, p.r, p.h, 32); liftY = p.h / 2; }
+  else if (type === 'sphere') { geo = new THREE.SphereGeometry(p.r, 32, 24); liftY = p.r; }
+  else if (type === 'cone') { geo = new THREE.ConeGeometry(p.r, p.h, 32); liftY = p.h / 2; }
+  geo.translate(0, liftY, 0);
+  return geo;
+}
+
+// Applies a new dimension value to a primitive object and regenerates its geometry.
+function updatePrimitiveDimension(entry, key, value) {
+  entry.mesh.userData.primParams[key] = value;
+  const newGeo = buildPrimitiveGeometry(entry.mesh.userData.primType, entry.mesh.userData.primParams);
+  entry.mesh.geometry.dispose();
+  entry.mesh.geometry = newGeo;
+}
+
+let nameCounters = {};
+function prettyName(base) {
+  nameCounters[base] = (nameCounters[base] || 0) + 1;
+  const labels = { box: 'Cube', cylinder: 'Cylindre', sphere: 'Sphère', cone: 'Cône', extrude: 'Extrusion', revolve: 'Révolution', pocket: 'Cavité', union: 'Union', subtract: 'Différence', intersect: 'Intersection' };
+  return `${labels[base] || base} ${nameCounters[base]}`;
+}
+
+function selectObject(entry) {
+  selected = entry;
+  transformControls.detach();
+  objects.forEach(o => o.mesh.material.emissive && o.mesh.material.emissive.setHex(0x000000));
+  if (entry) {
+    if (entry.mesh.material.emissive) entry.mesh.material.emissive.setHex(0x123b38);
+    transformControls.attach(entry.mesh);
+  }
+  renderObjectList();
+  renderPropertiesPanel();
+  updateButtonStates();
+}
+
+function deleteSelected() {
+  if (!selected) return;
+  const name = selected.name;
+  transformControls.detach();
+  scene.remove(selected.mesh);
+  selected.mesh.geometry.dispose();
+  selected.mesh.material.dispose();
+  objects = objects.filter(o => o !== selected);
+  selected = null;
+  renderObjectList();
+  renderPropertiesPanel();
+  updateButtonStates();
+  logHistory(`Objet supprimé : « ${name} »`);
+}
+
+// Dimension field definitions per primitive type: [paramKey, label, min, step].
+const PRIM_DIM_FIELDS = {
+  box: [['w', 'Largeur (X)', 0.05, 0.1], ['h', 'Hauteur (Y)', 0.05, 0.1], ['d', 'Profondeur (Z)', 0.05, 0.1]],
+  cylinder: [['r', 'Rayon', 0.05, 0.05], ['h', 'Hauteur', 0.05, 0.1]],
+  sphere: [['r', 'Rayon', 0.05, 0.05]],
+  cone: [['r', 'Rayon', 0.05, 0.05], ['h', 'Hauteur', 0.05, 0.1]]
+};
+
+function renderPropertiesPanel() {
+  const el = document.getElementById('prop-content');
+  if (!el) return;
+  if (!selected) {
+    el.className = 'prop-empty';
+    el.textContent = 'Sélectionnez un objet';
+    return;
+  }
+  el.className = '';
+  el.innerHTML = '';
+  const entry = selected;
+
+  if (entry.mesh.userData.primType && PRIM_DIM_FIELDS[entry.mesh.userData.primType]) {
+    const dimTitle = document.createElement('div');
+    dimTitle.className = 'prop-label';
+    dimTitle.textContent = 'Dimensions';
+    el.appendChild(dimTitle);
+    PRIM_DIM_FIELDS[entry.mesh.userData.primType].forEach(([key, label, min, step]) => {
+      const row = document.createElement('div');
+      row.className = 'prop-row';
+      const lab = document.createElement('span');
+      lab.className = 'prop-key';
+      lab.textContent = label;
+      const input = document.createElement('input');
+      input.type = 'number';
+      input.step = String(step);
+      input.min = String(min);
+      input.value = Math.round(entry.mesh.userData.primParams[key] * 100) / 100;
+      input.addEventListener('change', () => {
+        const v = Math.max(min, parseFloat(input.value) || min);
+        input.value = v;
+        updatePrimitiveDimension(entry, key, v);
+      });
+      row.appendChild(lab);
+      row.appendChild(input);
+      el.appendChild(row);
+    });
+  }
+
+  const posTitle = document.createElement('div');
+  posTitle.className = 'prop-label';
+  posTitle.textContent = 'Position';
+  el.appendChild(posTitle);
+  ['x', 'y', 'z'].forEach(axis => {
+    const row = document.createElement('div');
+    row.className = 'prop-row';
+    const lab = document.createElement('span');
+    lab.className = 'prop-key';
+    lab.textContent = axis.toUpperCase();
+    const input = document.createElement('input');
+    input.type = 'number';
+    input.step = '0.1';
+    input.value = Math.round(entry.mesh.position[axis] * 100) / 100;
+    input.addEventListener('change', () => {
+      const v = parseFloat(input.value);
+      if (!isNaN(v)) entry.mesh.position[axis] = v;
+    });
+    row.appendChild(lab);
+    row.appendChild(input);
+    el.appendChild(row);
+  });
+}
+
+// ---------------------------------------------------------------------------
+// History log — a readable trace of modeling actions (not a live parametric
+// tree: editing an earlier step doesn't replay later ones), shown in its own
+// panel tab so it doesn't crowd the object list.
+// ---------------------------------------------------------------------------
+function logHistory(text) {
+  historyLog.unshift({ text, t: Date.now() });
+  if (historyLog.length > 200) historyLog.length = 200;
+  renderHistoryPanel();
+}
+
+function renderHistoryPanel() {
+  const list = document.getElementById('history-list');
+  if (!list) return;
+  if (!historyLog.length) {
+    list.innerHTML = '<li class="empty">Aucune action pour l\'instant</li>';
+    return;
+  }
+  list.innerHTML = '';
+  historyLog.forEach(h => {
+    const li = document.createElement('li');
+    const time = new Date(h.t).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    li.innerHTML = '';
+    const textSpan = document.createElement('span');
+    textSpan.textContent = h.text;
+    const timeSpan = document.createElement('span');
+    timeSpan.className = 'h-time';
+    timeSpan.textContent = time;
+    li.appendChild(textSpan);
+    li.appendChild(timeSpan);
+    list.appendChild(li);
+  });
+}
+
+function switchPanelTab(tab) {
+  ['objects', 'history'].forEach(t => {
+    document.getElementById('ptab-' + t).classList.toggle('active', t === tab);
+    document.getElementById('tab-' + t).classList.toggle('active', t === tab);
+  });
+}
+
+function renderObjectList() {
+  const list = document.getElementById('obj-list');
+  document.getElementById('status-right').textContent = `${objects.length} objet(s)`;
+  if (!objects.length) {
+    list.innerHTML = '<li class="empty">Aucun objet</li>';
+    return;
+  }
+  list.innerHTML = '';
+  objects.slice().reverse().forEach(o => {
+    const li = document.createElement('li');
+    if (selected === o) li.classList.add('selected');
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'name';
+    nameSpan.textContent = o.name;
+    nameSpan.addEventListener('click', () => selectObject(o));
+    const visBtn = document.createElement('button');
+    visBtn.textContent = o.mesh.visible ? '👁' : '🚫';
+    if (!o.mesh.visible) visBtn.classList.add('vis-off');
+    visBtn.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      o.mesh.visible = !o.mesh.visible;
+      renderObjectList();
+    });
+    let editBtn = null;
+    if (o.sketchData) {
+      editBtn = document.createElement('button');
+      editBtn.textContent = '✏️';
+      editBtn.title = 'Modifier l\'esquisse';
+      editBtn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        editObjectSketch(o);
+      });
+    }
+    const delBtn = document.createElement('button');
+    delBtn.textContent = '🗑';
+    delBtn.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      if (selected !== o) selectObject(o);
+      deleteSelected();
+    });
+    li.appendChild(nameSpan);
+    li.appendChild(visBtn);
+    if (editBtn) li.appendChild(editBtn);
+    li.appendChild(delBtn);
+    list.appendChild(li);
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Sketch mode
+// ---------------------------------------------------------------------------
+function initSketchCanvas() {
+  sketchEl = document.getElementById('sketch-canvas');
+  sketchCtx = sketchEl.getContext('2d');
+
+  sketchEl.addEventListener('pointerdown', onSketchDown);
+  sketchEl.addEventListener('pointermove', onSketchMove);
+  sketchEl.addEventListener('pointerup', onSketchUp);
+}
+
+function resizeSketchCanvas() {
+  if (!sketchEl) return;
+  const wrap = document.getElementById('viewport-wrap');
+  sketchEl.width = wrap.clientWidth;
+  sketchEl.height = wrap.clientHeight;
+  drawSketch();
+}
+
+// ---------------------------------------------------------------------------
+// Sketch plane math
+// ---------------------------------------------------------------------------
+// Builds an orthonormal right-handed basis (xAxis, yAxis, normal) so that
+// xAxis × yAxis === normal. `helper` is any vector not parallel to normal.
+function computeBasis(normal, helper) {
+  const n = normal.clone().normalize();
+  const xAxis = new THREE.Vector3().crossVectors(helper, n).normalize();
+  const yAxis = new THREE.Vector3().crossVectors(n, xAxis).normalize();
+  return { xAxis, yAxis, normal: n };
+}
+
+const PLANE_PRESETS = {
+  ground: { normal: new THREE.Vector3(0, 1, 0), helper: new THREE.Vector3(0, 0, 1), label: 'plan du sol (XZ)' },
+  front: { normal: new THREE.Vector3(0, 0, 1), helper: new THREE.Vector3(0, 1, 0), label: 'face avant (XY)' },
+  side: { normal: new THREE.Vector3(1, 0, 0), helper: new THREE.Vector3(0, 1, 0), label: 'profil (YZ)' }
+};
+
+function makePlane(origin, normal, helper, parentEntry, label) {
+  const basis = computeBasis(normal, helper);
+  return {
+    origin: origin.clone(),
+    normal: basis.normal,
+    xAxis: basis.xAxis,
+    yAxis: basis.yAxis,
+    threePlane: new THREE.Plane().setFromNormalAndCoplanarPoint(basis.normal, origin),
+    parentEntry: parentEntry || null,
+    label: label || ''
+  };
+}
+
+// Screen (client) coordinates -> local {x,y} sketch-plane units, via a real
+// camera ray / plane intersection (correct under perspective or orthographic,
+// any plane orientation).
+function screenToPlaneUnits(clientX, clientY) {
+  const rect = renderer.domElement.getBoundingClientRect();
+  pointerNDC.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+  pointerNDC.y = -((clientY - rect.top) / rect.height) * 2 + 1;
+  raycaster.setFromCamera(pointerNDC, activeCamera);
+  const hit = raycaster.ray.intersectPlane(sketch.plane.threePlane, _v3a);
+  if (!hit) return null;
+  _v3b.copy(hit).sub(sketch.plane.origin);
+  return { x: _v3b.dot(sketch.plane.xAxis), y: _v3b.dot(sketch.plane.yAxis) };
+}
+
+// Local {x,y} sketch-plane units -> screen pixel coords (relative to canvas).
+function planeUnitsToScreen(u, v) {
+  _v3a.copy(sketch.plane.origin)
+    .addScaledVector(sketch.plane.xAxis, u)
+    .addScaledVector(sketch.plane.yAxis, v)
+    .project(activeCamera);
+  return {
+    x: (_v3a.x * 0.5 + 0.5) * sketchEl.width,
+    y: (1 - (_v3a.y * 0.5 + 0.5)) * sketchEl.height
+  };
+}
+
+// The 4 corners (and center) of the canvas, unprojected onto the sketch plane,
+// give the exact visible range in plane-local units — used to bound the grid
+// so it never draws far-off/degenerate lines regardless of camera framing.
+function getVisiblePlaneBounds() {
+  const w = sketchEl.width, h = sketchEl.height;
+  const pts = [
+    screenToPlaneUnits2(0, 0), screenToPlaneUnits2(w, 0),
+    screenToPlaneUnits2(0, h), screenToPlaneUnits2(w, h)
+  ].filter(Boolean);
+  if (!pts.length) return { minU: -6, maxU: 6, minV: -6, maxV: 6 };
+  const us = pts.map(p => p.x), vs = pts.map(p => p.y);
+  return { minU: Math.min(...us), maxU: Math.max(...us), minV: Math.min(...vs), maxV: Math.max(...vs) };
+}
+// Same as screenToPlaneUnits but takes canvas-relative pixel coords directly.
+function screenToPlaneUnits2(px, py) {
+  const rect = sketchEl.getBoundingClientRect();
+  return screenToPlaneUnits(rect.left + px, rect.top + py);
+}
+
+function enterSketchModeOnPlane(plane) {
+  sketch.plane = plane;
+  mode = 'sketch';
+  sketch.tool = 'line';
+  sketch.entities = new Map();
+  sketch.constraints = new Map();
+  sketch.nextId = 1;
+  sketch.currentPointIds = [];
+  sketch.shapes = [];
+  sketch.selection = [];
+  sketch.editDragId = null;
+  sketch.editingEntry = null;
+  sketch.refLineId = null;
+  sketch.dragStart = null;
+  document.body.classList.add('sketching');
+  document.getElementById('sketch-toolbar').classList.add('show');
+  sketchEl.style.display = 'block';
+  setSketchTool('line');
+  transformControls.detach();
+  controls.enabled = false;
+  worldGrid.visible = false;
+  worldAxes.visible = false;
+  frameSketchCamera(plane);
+  activeCamera = sketchCamera;
+  resizeSketchCanvas();
+  // The sketch toolbar row just appeared, changing #main's available height —
+  // the renderer/camera must be resynced or the canvas keeps a stale resolution.
+  requestAnimationFrame(() => { syncAppSize(); onResize(); });
+  const parentTxt = plane.parentEntry ? ` — sur « ${plane.parentEntry.name} »` : plane.label ? ` — ${plane.label}` : '';
+  document.getElementById('status-left').textContent = `Mode esquisse${parentTxt}`;
+}
+
+// Points the dedicated orthographic camera straight down the sketch plane's
+// normal, framed to comfortably show the relevant solid (or a sensible
+// default). This is what makes the grid render as a clean, undistorted 2D view.
+function frameSketchCamera(plane) {
+  let radius = 3;
+  if (plane.parentEntry) {
+    const geo = plane.parentEntry.mesh.geometry;
+    if (!geo.boundingSphere) geo.computeBoundingSphere();
+    plane.parentEntry.mesh.updateMatrixWorld(true);
+    const worldScale = new THREE.Vector3();
+    plane.parentEntry.mesh.getWorldScale(worldScale);
+    const maxScale = Math.max(worldScale.x, worldScale.y, worldScale.z);
+    radius = Math.max(geo.boundingSphere.radius * maxScale, 0.5);
+  } else if (objects.length) {
+    const box = new THREE.Box3();
+    objects.forEach(o => { if (o.mesh.visible) box.expandByObject(o.mesh); });
+    if (!box.isEmpty()) {
+      const sphere = new THREE.Sphere();
+      box.getBoundingSphere(sphere);
+      radius = Math.max(sphere.radius, 1.5);
+    }
+  }
+  sketch.viewHalfSize = radius * 1.6;
+  sketch.viewDistance = radius * 4 + 4;
+
+  const camPos = plane.origin.clone().addScaledVector(plane.normal, sketch.viewDistance);
+  sketchCamera.position.copy(camPos);
+  sketchCamera.up.copy(plane.yAxis);
+  sketchCamera.lookAt(plane.origin);
+  sketchCamera.near = 0.01;
+  sketchCamera.far = sketch.viewDistance * 2 + 20;
+  updateSketchCameraFrustum();
+}
+
+function updateSketchCameraFrustum() {
+  const wrap = document.getElementById('viewport-wrap');
+  const aspect = wrap.clientWidth / wrap.clientHeight;
+  const h = sketch.viewHalfSize || 4;
+  sketchCamera.left = -h * aspect;
+  sketchCamera.right = h * aspect;
+  sketchCamera.top = h;
+  sketchCamera.bottom = -h;
+  sketchCamera.updateProjectionMatrix();
+}
+
+function exitSketchMode() {
+  mode = 'model';
+  activeCamera = camera;
+  worldGrid.visible = true;
+  worldAxes.visible = true;
+  sketch.editingEntry = null;
+  document.body.classList.remove('sketching');
+  document.getElementById('sketch-toolbar').classList.remove('show');
+  sketchEl.style.display = 'none';
+  controls.enabled = true;
+  document.getElementById('hint').textContent = '';
+  document.getElementById('status-left').textContent = 'Mode modélisation';
+  renderConstraintPanel();
+  // The sketch toolbar row just disappeared, changing #main's available
+  // height back — resync the renderer/camera or the canvas stays stale.
+  requestAnimationFrame(() => { syncAppSize(); onResize(); });
+}
+
+// -- Entry points: plain plane choice, or picking a face on a solid --------
+function openPlaneChoice() {
+  document.getElementById('plane-choice').classList.add('show');
+}
+function closePlaneChoice() {
+  document.getElementById('plane-choice').classList.remove('show');
+}
+function startPlaneSketch(name) {
+  closePlaneChoice();
+  const p = PLANE_PRESETS[name];
+  enterSketchModeOnPlane(makePlane(new THREE.Vector3(0, 0, 0), p.normal, p.helper, null, p.label));
+}
+
+function startFacePick() {
+  pickingFace = true;
+  document.body.classList.add('picking-face');
+  document.getElementById('status-left').textContent = 'Touchez une face d\'un objet';
+  document.getElementById('hint').textContent = 'Touchez une face plane d\'un solide pour la sélectionner. Appuyez à nouveau sur le bouton pour annuler.';
+}
+function cancelFacePick() {
+  pickingFace = false;
+  document.body.classList.remove('picking-face');
+  removeFacePreview();
+  document.getElementById('status-left').textContent = 'Mode modélisation';
+  document.getElementById('hint').textContent = '';
+}
+
+// A translucent disc shown on the picked face while the user confirms it,
+// so the face is actually *selected* (with visual feedback) before the
+// sketch is activated — rather than jumping straight into sketch mode.
+let facePreviewMesh = null;
+function showFacePreview(origin, normal, radius) {
+  removeFacePreview();
+  const geo = new THREE.CircleGeometry(Math.max(radius * 0.4, 0.15), 40);
+  const mat = new THREE.MeshBasicMaterial({ color: 0x4fd1c5, transparent: true, opacity: 0.35, side: THREE.DoubleSide, depthTest: false });
+  facePreviewMesh = new THREE.Mesh(geo, mat);
+  facePreviewMesh.position.copy(origin).addScaledVector(normal, 0.005);
+  facePreviewMesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), normal);
+  facePreviewMesh.renderOrder = 999;
+  scene.add(facePreviewMesh);
+}
+function removeFacePreview() {
+  if (facePreviewMesh) {
+    scene.remove(facePreviewMesh);
+    facePreviewMesh.geometry.dispose();
+    facePreviewMesh.material.dispose();
+    facePreviewMesh = null;
+  }
+}
+
+function handleFacePick(hit) {
+  const entry = objects.find(o => o.mesh === hit.object);
+  if (!hit.face) { flashHint('Face introuvable, réessayez.'); return; }
+  const normalMatrix = new THREE.Matrix3().getNormalMatrix(hit.object.matrixWorld);
+  const normal = hit.face.normal.clone().applyMatrix3(normalMatrix).normalize();
+  const helper = Math.abs(normal.y) < 0.9 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(1, 0, 0);
+  const plane = makePlane(hit.point, normal, helper, entry, 'face sélectionnée');
+
+  entry.mesh.updateMatrixWorld(true);
+  if (!entry.mesh.geometry.boundingSphere) entry.mesh.geometry.computeBoundingSphere();
+  const worldScale = new THREE.Vector3();
+  entry.mesh.getWorldScale(worldScale);
+  const radius = Math.max(entry.mesh.geometry.boundingSphere.radius * Math.max(worldScale.x, worldScale.y, worldScale.z), 0.5);
+  showFacePreview(hit.point, normal, radius);
+
+  document.getElementById('status-left').textContent = 'Face sélectionnée — confirmer ?';
+  document.getElementById('face-confirm').classList.add('show');
+
+  const okBtn = document.getElementById('fc-ok');
+  const otherBtn = document.getElementById('fc-other');
+  const cancelBtn = document.getElementById('fc-cancel');
+  function cleanup() {
+    document.getElementById('face-confirm').classList.remove('show');
+    okBtn.removeEventListener('click', onOk);
+    otherBtn.removeEventListener('click', onOther);
+    cancelBtn.removeEventListener('click', onCancel);
+  }
+  function onOk() {
+    cleanup();
+    removeFacePreview();
+    pickingFace = false;
+    document.body.classList.remove('picking-face');
+    enterSketchModeOnPlane(plane);
+  }
+  function onOther() {
+    cleanup();
+    removeFacePreview();
+    document.getElementById('status-left').textContent = 'Touchez une face d\'un objet';
+  }
+  function onCancel() {
+    cleanup();
+    cancelFacePick();
+  }
+  okBtn.addEventListener('click', onOk);
+  otherBtn.addEventListener('click', onOther);
+  cancelBtn.addEventListener('click', onCancel);
+}
+
+// ---------------------------------------------------------------------------
+// Sketch entity model (points / lines / circles) + constraints
+// ---------------------------------------------------------------------------
+function newEntityId() { return String(sketch.nextId++); }
+
+function addPointEntity(x, y) {
+  const id = newEntityId();
+  sketch.entities.set(id, { id, type: 'point', x, y, fixed: false });
+  return id;
+}
+function addLineEntity(p1_id, p2_id) {
+  const id = newEntityId();
+  sketch.entities.set(id, { id, type: 'line', p1_id, p2_id });
+  return id;
+}
+function addCircleEntity(c_id, radius) {
+  const id = newEntityId();
+  sketch.entities.set(id, { id, type: 'circle', c_id, radius });
+  return id;
+}
+function addConstraintPrimitive(type, props) {
+  const id = newEntityId();
+  const c = { id, type, ...props };
+  sketch.constraints.set(id, c);
+  return id;
+}
+
+// Sends the whole current sketch (+ optional extra, non-persisted primitives
+// such as a temporary drag-pin) to the planegcs solver, then reads the
+// resolved point/circle values back into our entity model.
+async function solveSketch(extraPrimitives) {
+  if (gcsStatus !== 'ready' || !gcsWrapper) { drawSketch(); return; }
+  try {
+    gcsWrapper.clear_data();
+    const primitives = [...sketch.entities.values(), ...sketch.constraints.values(), ...(extraPrimitives || [])];
+    gcsWrapper.push_primitives_and_params(primitives);
+    const status = gcsWrapper.solve();
+    gcsWrapper.apply_solution();
+    if (status !== SolveStatus.Success && status !== SolveStatus.Converged) {
+      flashHint('Contraintes en conflit ou insuffisantes : résultat approximatif.');
+    }
+    for (const prim of gcsWrapper.sketch_index.get_primitives()) {
+      const e = sketch.entities.get(prim.id);
+      if (!e) continue;
+      if (prim.type === 'point') { e.x = prim.x; e.y = prim.y; }
+      else if (prim.type === 'circle') { e.radius = prim.radius; }
+    }
+  } catch (err) {
+    console.error('gcs solve error', err);
+    flashHint('Erreur du solveur de contraintes.');
+  }
+  drawSketch();
+}
+function solveAndClearSelection() {
+  sketch.selection = [];
+  renderConstraintPanel();
+  solveSketch();
+}
+
+// Builds the transient primitives for a temporary "drag pin": while the user
+// drags a point, we pin it toward the finger with a *temporary* coincident
+// constraint (doesn't reduce DOF, doesn't persist) so the solver shows how
+// the rest of the sketch reacts, without permanently constraining anything.
+function buildDragPin(pointId, targetX, targetY) {
+  const pinId = newEntityId();
+  const pin = { id: pinId, type: 'point', x: targetX, y: targetY, fixed: true };
+  const consId = newEntityId();
+  const cons = { id: consId, type: 'p2p_coincident', p1_id: pointId, p2_id: pinId, temporary: true };
+  return [pin, cons];
+}
+
+// Resolves the two endpoint entities for a Distance/Longueur constraint,
+// whether the selection is 2 points or a single line (using its own ends).
+function distanceEndpoints(s) {
+  if (s.length === 1 && s[0].kind === 'line') {
+    const l = sketch.entities.get(s[0].id);
+    return [sketch.entities.get(l.p1_id), sketch.entities.get(l.p2_id)];
+  }
+  return [sketch.entities.get(s[0].id), sketch.entities.get(s[1].id)];
+}
+
+// A hidden, fixed horizontal reference line (0,0)->(1,0), created lazily and
+// reused, so a single line's angle can be constrained relative to the
+// horizontal axis via the same l2l_angle_ll primitive used for line-to-line
+// angles. Marked `ref:true` so it's excluded from rendering and hit-testing.
+function getReferenceHorizontalLine() {
+  if (sketch.refLineId && sketch.entities.has(sketch.refLineId)) return sketch.refLineId;
+  const p1 = addPointEntity(0, 0);
+  const p2 = addPointEntity(1, 0);
+  sketch.entities.get(p1).fixed = true;
+  sketch.entities.get(p1).ref = true;
+  sketch.entities.get(p2).fixed = true;
+  sketch.entities.get(p2).ref = true;
+  const lineId = addLineEntity(p1, p2);
+  sketch.entities.get(lineId).ref = true;
+  sketch.refLineId = lineId;
+  return lineId;
+}
+
+const CONSTRAINT_DEFS = [
+  { key: 'coincident', label: '📍 Coïncident',
+    match: s => s.length === 2 && s.every(x => x.kind === 'point'),
+    apply: s => addConstraintPrimitive('p2p_coincident', { p1_id: s[0].id, p2_id: s[1].id }) },
+  { key: 'horizontal', label: '↔ Horizontal',
+    match: s => (s.length === 1 && s[0].kind === 'line') || (s.length === 2 && s.every(x => x.kind === 'point')),
+    apply: s => s.length === 1
+      ? addConstraintPrimitive('horizontal_l', { l_id: s[0].id })
+      : addConstraintPrimitive('horizontal_pp', { p1_id: s[0].id, p2_id: s[1].id }) },
+  { key: 'vertical', label: '↕ Vertical',
+    match: s => (s.length === 1 && s[0].kind === 'line') || (s.length === 2 && s.every(x => x.kind === 'point')),
+    apply: s => s.length === 1
+      ? addConstraintPrimitive('vertical_l', { l_id: s[0].id })
+      : addConstraintPrimitive('vertical_pp', { p1_id: s[0].id, p2_id: s[1].id }) },
+  { key: 'parallel', label: '∥ Parallèle',
+    match: s => s.length === 2 && s.every(x => x.kind === 'line'),
+    apply: s => addConstraintPrimitive('parallel', { l1_id: s[0].id, l2_id: s[1].id }) },
+  { key: 'perpendicular', label: '⟂ Perpendiculaire',
+    match: s => s.length === 2 && s.every(x => x.kind === 'line'),
+    apply: s => addConstraintPrimitive('perpendicular_ll', { l1_id: s[0].id, l2_id: s[1].id }) },
+  { key: 'equal', label: '= Égal',
+    match: s => s.length === 2 && (s.every(x => x.kind === 'line') || s.every(x => x.kind === 'circle')),
+    apply: s => s[0].kind === 'line'
+      ? addConstraintPrimitive('equal_length', { l1_id: s[0].id, l2_id: s[1].id })
+      : addConstraintPrimitive('equal_radius_cc', { c1_id: s[0].id, c2_id: s[1].id }) },
+  { key: 'distance', label: '📏 Longueur / Distance', needsValue: true,
+    match: s => (s.length === 2 && s.every(x => x.kind === 'point')) || (s.length === 1 && s[0].kind === 'line'),
+    getDefault: s => {
+      const [p1, p2] = distanceEndpoints(s);
+      return Math.hypot(p2.x - p1.x, p2.y - p1.y);
+    },
+    apply: (s, val) => {
+      const ids = s.length === 1 ? (() => { const l = sketch.entities.get(s[0].id); return [l.p1_id, l.p2_id]; })() : [s[0].id, s[1].id];
+      addConstraintPrimitive('p2p_distance', { p1_id: ids[0], p2_id: ids[1], distance: val });
+    } },
+  { key: 'radius', label: '⌀ Rayon', needsValue: true,
+    match: s => s.length === 1 && s[0].kind === 'circle',
+    getDefault: s => sketch.entities.get(s[0].id).radius,
+    apply: (s, val) => addConstraintPrimitive('circle_radius', { c_id: s[0].id, radius: val }) },
+  { key: 'point_on_object', label: '⌖ Point sur ligne/cercle',
+    match: s => s.length === 2 && s.some(x => x.kind === 'point') && s.some(x => x.kind === 'line' || x.kind === 'circle'),
+    apply: s => {
+      const pt = s.find(x => x.kind === 'point'), other = s.find(x => x.kind !== 'point');
+      return other.kind === 'line'
+        ? addConstraintPrimitive('point_on_line_pl', { p_id: pt.id, l_id: other.id })
+        : addConstraintPrimitive('point_on_circle', { p_id: pt.id, c_id: other.id });
+    } },
+  { key: 'tangent', label: '⌒ Tangent',
+    match: s => s.length === 2 && (s.every(x => x.kind === 'circle') || (s.some(x => x.kind === 'line') && s.some(x => x.kind === 'circle'))),
+    apply: s => {
+      if (s.every(x => x.kind === 'circle')) return addConstraintPrimitive('tangent_cc', { c1_id: s[0].id, c2_id: s[1].id });
+      const l = s.find(x => x.kind === 'line'), c = s.find(x => x.kind === 'circle');
+      return addConstraintPrimitive('tangent_lc', { l_id: l.id, c_id: c.id });
+    } },
+  { key: 'angle', label: '∠ Angle (2 lignes)', needsValue: true, valueLabel: 'Angle (°)',
+    match: s => s.length === 2 && s.every(x => x.kind === 'line'),
+    getDefault: () => 90,
+    apply: (s, deg) => addConstraintPrimitive('l2l_angle_ll', { l1_id: s[0].id, l2_id: s[1].id, angle: THREE.MathUtils.degToRad(deg) }) },
+  { key: 'angle_axis', label: '∠ Angle (horizontale)', needsValue: true, valueLabel: 'Angle (°)',
+    match: s => s.length === 1 && s[0].kind === 'line',
+    getDefault: s => {
+      const l = sketch.entities.get(s[0].id);
+      const p1 = sketch.entities.get(l.p1_id), p2 = sketch.entities.get(l.p2_id);
+      return THREE.MathUtils.radToDeg(Math.atan2(p2.y - p1.y, p2.x - p1.x));
+    },
+    apply: (s, deg) => {
+      const refLine = getReferenceHorizontalLine();
+      addConstraintPrimitive('l2l_angle_ll', { l1_id: refLine, l2_id: s[0].id, angle: THREE.MathUtils.degToRad(deg) });
+    } },
+  { key: 'symmetric', label: '⇔ Symétrique',
+    match: s => s.length === 3 && s.filter(x => x.kind === 'point').length >= 2,
+    apply: s => {
+      const pts = s.filter(x => x.kind === 'point');
+      const third = s.find(x => x !== pts[0] && x !== pts[1]);
+      return third.kind === 'line'
+        ? addConstraintPrimitive('p2p_symmetric_ppl', { p1_id: pts[0].id, p2_id: pts[1].id, l_id: third.id })
+        : addConstraintPrimitive('p2p_symmetric_ppp', { p1_id: pts[0].id, p2_id: pts[1].id, p_id: third.id });
+    } },
+];
+
+function toggleSelection(hit) {
+  const idx = sketch.selection.findIndex(s => s.kind === hit.kind && s.id === hit.id);
+  if (idx >= 0) sketch.selection.splice(idx, 1);
+  else {
+    if (sketch.selection.length >= 4) sketch.selection.shift();
+    sketch.selection.push(hit);
+  }
+  renderConstraintPanel();
+  drawSketch();
+}
+
+function renderConstraintPanel() {
+  const panel = document.getElementById('constraint-panel');
+  if (!panel) return;
+  if (sketch.tool !== 'constrain' || mode !== 'sketch') { panel.classList.remove('show'); panel.innerHTML = ''; return; }
+
+  const sel = sketch.selection;
+  const kindLabel = { point: 'point', line: 'ligne', circle: 'cercle' };
+  const selTxt = sel.length ? sel.map(s => kindLabel[s.kind]).join(' + ') : 'aucune sélection';
+  const available = CONSTRAINT_DEFS.filter(d => d.match(sel));
+
+  panel.classList.add('show');
+  panel.innerHTML = '';
+  const info = document.createElement('div');
+  info.className = 'cp-info';
+  info.textContent = `Sélection : ${selTxt}`;
+  panel.appendChild(info);
+
+  const row = document.createElement('div');
+  row.className = 'cp-row';
+  if (!available.length) {
+    const hint = document.createElement('div');
+    hint.className = 'cp-hint';
+    hint.textContent = sel.length
+      ? 'Aucune contrainte compatible avec cette sélection.'
+      : 'Touchez un ou plusieurs éléments (points, lignes, cercles).';
+    row.appendChild(hint);
+  }
+  available.forEach(def => {
+    const btn = document.createElement('button');
+    btn.className = 'tool';
+    btn.textContent = def.label;
+    btn.addEventListener('click', () => {
+      const s = sel.slice();
+      if (def.needsValue) {
+        openDimInput(def.valueLabel || def.key, Math.round((def.getDefault(s) || 1) * 100) / 100, (val) => {
+          def.apply(s, val);
+          solveAndClearSelection();
+        });
+      } else {
+        def.apply(s);
+        solveAndClearSelection();
+      }
+    });
+    row.appendChild(btn);
+  });
+  panel.appendChild(row);
+
+  if (sel.length) {
+    const clearBtn = document.createElement('button');
+    clearBtn.className = 'tool cp-clear';
+    clearBtn.textContent = '✕ Vider la sélection';
+    clearBtn.addEventListener('click', () => { sketch.selection = []; renderConstraintPanel(); drawSketch(); });
+    panel.appendChild(clearBtn);
+  }
+
+  renderConstraintList(panel);
+}
+
+// Human-readable labels for constraints, and which of them carry an editable
+// numeric value (and its field name / whether that value is an angle in
+// radians that needs degrees<->radians conversion for display).
+const CONSTRAINT_LABELS = {
+  p2p_coincident: 'Coïncident', horizontal_l: 'Horizontal', horizontal_pp: 'Horizontal',
+  vertical_l: 'Vertical', vertical_pp: 'Vertical', parallel: 'Parallèle',
+  perpendicular_ll: 'Perpendiculaire', equal_length: 'Égal (longueur)', equal_radius_cc: 'Égal (rayon)',
+  p2p_distance: 'Distance', circle_radius: 'Rayon', point_on_line_pl: 'Point sur ligne',
+  point_on_circle: 'Point sur cercle', tangent_lc: 'Tangent', tangent_cc: 'Tangent',
+  l2l_angle_ll: 'Angle', p2p_symmetric_ppl: 'Symétrique', p2p_symmetric_ppp: 'Symétrique'
+};
+const CONSTRAINT_VALUE_FIELDS = { p2p_distance: 'distance', circle_radius: 'radius', l2l_angle_ll: 'angle' };
+
+// Lists every constraint currently posed on the sketch, with an editable
+// value field for the numeric ones (Distance / Rayon / Angle) and a delete
+// button for all of them.
+function renderConstraintList(panel) {
+  if (!sketch.constraints.size) return;
+  const wrap = document.createElement('div');
+  wrap.className = 'cp-list';
+  const title = document.createElement('div');
+  title.className = 'cp-info';
+  title.textContent = 'Contraintes posées :';
+  wrap.appendChild(title);
+
+  for (const c of sketch.constraints.values()) {
+    const row = document.createElement('div');
+    row.className = 'cp-list-row';
+    const label = document.createElement('span');
+    label.className = 'cp-list-label';
+    label.textContent = CONSTRAINT_LABELS[c.type] || c.type;
+    row.appendChild(label);
+
+    const field = CONSTRAINT_VALUE_FIELDS[c.type];
+    if (field) {
+      const isAngle = c.type === 'l2l_angle_ll';
+      const display = isAngle ? THREE.MathUtils.radToDeg(c[field]) : c[field];
+      const input = document.createElement('input');
+      input.type = 'number';
+      input.step = '0.01';
+      input.value = Math.round(display * 100) / 100;
+      input.className = 'cp-val-input';
+      const applyBtn = document.createElement('button');
+      applyBtn.className = 'tool';
+      applyBtn.textContent = '✓';
+      applyBtn.addEventListener('click', () => {
+        const v = parseFloat(input.value);
+        if (!isNaN(v)) {
+          c[field] = isAngle ? THREE.MathUtils.degToRad(v) : v;
+          solveSketch();
+        }
+      });
+      row.appendChild(input);
+      row.appendChild(applyBtn);
+    }
+
+    const delBtn = document.createElement('button');
+    delBtn.className = 'tool danger';
+    delBtn.textContent = '🗑';
+    delBtn.addEventListener('click', () => {
+      sketch.constraints.delete(c.id);
+      solveSketch();
+      renderConstraintPanel();
+    });
+    row.appendChild(delBtn);
+    wrap.appendChild(row);
+  }
+  panel.appendChild(wrap);
+}
+
+function setSketchTool(tool) {
+  sketch.tool = tool;
+  sketch.currentPointIds = [];
+  sketch.dragStart = null;
+  sketch.editDragId = null;
+  ['sk-line', 'sk-rect', 'sk-circle', 'sk-edit', 'sk-constrain'].forEach(id => document.getElementById(id).classList.remove('active'));
+  const map = { line: 'sk-line', rect: 'sk-rect', circle: 'sk-circle', edit: 'sk-edit', constrain: 'sk-constrain' };
+  document.getElementById(map[tool]).classList.add('active');
+  const hints = {
+    line: 'Touchez pour ajouter des points (accroche H/V auto = vraie contrainte). Tapez près du 1er point ou "Fermer" pour boucler.',
+    rect: 'Touchez un 1er coin puis un 2ᵉ (ou glissez d\'un coin à l\'autre). Côtés auto-contraints horizontaux/verticaux.',
+    circle: 'Touchez le centre puis un point sur le bord (ou glissez du centre vers le bord).',
+    edit: 'Glissez un point existant : au relâchement, le solveur recalcule la géométrie selon les contraintes.',
+    constrain: 'Touchez un ou plusieurs éléments puis choisissez une contrainte ci-dessous.'
+  };
+  document.getElementById('hint').textContent = hints[tool];
+  const toolLabels = { line: '📈 Ligne', rect: '▭ Rectangle', circle: '◯ Cercle', edit: '✥ Éditer', constrain: '🔗 Contraintes' };
+  document.getElementById('sk-menu-draw').textContent = toolLabels[tool] + ' ▾';
+  renderConstraintPanel();
+  drawSketch();
+}
+
+function onSketchDown(e) {
+  sketchEl.setPointerCapture(e.pointerId);
+  const rect = sketchEl.getBoundingClientRect();
+  const px = e.clientX - rect.left, py = e.clientY - rect.top;
+  let u = screenToPlaneUnits(e.clientX, e.clientY);
+  if (!u) return;
+
+  // In Éditer/Contraintes (tools that don't place new geometry on tap), a tap
+  // on a dimension label ("cote") takes priority: open a direct value editor.
+  if (sketch.showDimensions && (sketch.tool === 'edit' || sketch.tool === 'constrain')) {
+    const dim = hitTestDimension(px, py);
+    if (dim) {
+      if (dim.kind === 'line') {
+        const l = sketch.entities.get(dim.id);
+        const p1 = sketch.entities.get(l.p1_id), p2 = sketch.entities.get(l.p2_id);
+        const cur = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+        openDimInput('Longueur', Math.round(cur * 100) / 100, (val) => setLineLength(dim.id, val));
+      } else if (dim.kind === 'circle') {
+        const c = sketch.entities.get(dim.id);
+        openDimInput('Rayon', Math.round(c.radius * 100) / 100, (val) => setCircleRadius(dim.id, val));
+      }
+      return;
+    }
+  }
+
+  if (sketch.tool === 'line') {
+    if (sketch.currentPointIds.length > 2) {
+      const first = sketch.entities.get(sketch.currentPointIds[0]);
+      const firstScreen = planeUnitsToScreen(first.x, first.y);
+      if (Math.hypot(px - firstScreen.x, py - firstScreen.y) < 14) {
+        closeCurrentPolyline();
+        return;
+      }
+    }
+    const nearby = findNearbyPointEntity(px, py);
+    let pointId;
+    let snappedU;
+    if (nearby) { pointId = nearby.id; snappedU = { x: nearby.x, y: nearby.y }; }
+    else {
+      snappedU = applySnap(u);
+      pointId = addPointEntity(snappedU.x, snappedU.y);
+    }
+    let axisLockType = null;
+    if (sketch.currentPointIds.length) {
+      const { locked } = applyAxisLock(snappedU);
+      axisLockType = locked;
+    }
+    const prevId = sketch.currentPointIds[sketch.currentPointIds.length - 1];
+    sketch.currentPointIds.push(pointId);
+    if (prevId !== undefined) {
+      const lineId = addLineEntity(prevId, pointId);
+      if (axisLockType === 'h') addConstraintPrimitive('horizontal_l', { l_id: lineId });
+      else if (axisLockType === 'v') addConstraintPrimitive('vertical_l', { l_id: lineId });
+    }
+    solveSketch();
+  } else if (sketch.tool === 'edit') {
+    const hit = findNearbyPointEntity(px, py);
+    sketch.editDragId = hit ? hit.id : null;
+    drawSketch();
+  } else if (sketch.tool === 'constrain') {
+    const hit = hitTestEntity(px, py);
+    if (hit) toggleSelection(hit);
+  } else if (sketch.tool === 'rect' || sketch.tool === 'circle') {
+    u = applySnap(u);
+    if (!sketch.dragStart) {
+      // First touch: place the starting corner/center. Give immediate visual
+      // feedback (a marker) even before any drag happens.
+      sketch.dragStart = u;
+      sketch.dragCurrent = u;
+    } else {
+      // A second, separate tap: treat it as defining the far corner/edge
+      // directly (matches the "tap, tap" pattern used by the Line tool).
+      sketch.dragCurrent = u;
+      finalizeRectOrCircle();
+    }
+    drawSketch();
+  }
+}
+
+function onSketchMove(e) {
+  const rect = sketchEl.getBoundingClientRect();
+  const px = e.clientX - rect.left, py = e.clientY - rect.top;
+  let u = screenToPlaneUnits(e.clientX, e.clientY);
+  if (!u) return;
+
+  if (sketch.tool !== 'line' && sketch.tool !== 'edit' && sketch.dragStart) {
+    sketch.dragCurrent = applySnap(u);
+    drawSketch();
+  } else if (sketch.tool === 'line') {
+    sketch.hoverPoint = applySnap(u);
+    if (sketch.currentPointIds.length) sketch.hoverPoint = applyAxisLock(sketch.hoverPoint).pt;
+    drawSketch();
+  } else if (sketch.tool === 'edit' && sketch.editDragId) {
+    const snapped = applySnap(u);
+    const e2 = sketch.entities.get(sketch.editDragId);
+    if (e2) { e2.x = snapped.x; e2.y = snapped.y; }
+    drawSketch();
+  }
+}
+
+function onSketchUp(e) {
+  if ((sketch.tool === 'rect' || sketch.tool === 'circle') && sketch.dragStart) {
+    const a = sketch.dragStart, b = sketch.dragCurrent || a;
+    const moved = Math.hypot(b.x - a.x, b.y - a.y) > sketch.gridStep * 0.6;
+    if (moved) {
+      // A real drag happened: finalize now using the release point.
+      finalizeRectOrCircle();
+    }
+    // Otherwise this was just "tap 1" (placing the start corner/center) —
+    // leave dragStart set and wait for a second tap to complete the shape.
+  } else if (sketch.tool === 'edit' && sketch.editDragId) {
+    const e2 = sketch.entities.get(sketch.editDragId);
+    if (e2) solveSketch(buildDragPin(sketch.editDragId, e2.x, e2.y));
+    sketch.editDragId = null;
+  }
+  drawSketch();
+}
+
+// Builds the rectangle/circle entity from sketch.dragStart -> sketch.dragCurrent,
+// then clears dragStart. Called either after a real drag (pointerup) or after
+// a second separate tap defining the far corner/edge (pointerdown).
+function finalizeRectOrCircle() {
+  const a = sketch.dragStart, b = sketch.dragCurrent || a;
+  if (sketch.tool === 'rect') {
+    if (Math.abs(b.x - a.x) > 0.02 && Math.abs(b.y - a.y) > 0.02) {
+      const p1 = addPointEntity(a.x, a.y), p2 = addPointEntity(b.x, a.y);
+      const p3 = addPointEntity(b.x, b.y), p4 = addPointEntity(a.x, b.y);
+      const lTop = addLineEntity(p1, p2), lRight = addLineEntity(p2, p3);
+      const lBottom = addLineEntity(p3, p4), lLeft = addLineEntity(p4, p1);
+      addConstraintPrimitive('horizontal_l', { l_id: lTop });
+      addConstraintPrimitive('horizontal_l', { l_id: lBottom });
+      addConstraintPrimitive('vertical_l', { l_id: lRight });
+      addConstraintPrimitive('vertical_l', { l_id: lLeft });
+      sketch.shapes.push({ kind: 'polygon', pointIds: [p1, p2, p3, p4] });
+      solveSketch();
+    }
+  } else if (sketch.tool === 'circle') {
+    const r = Math.hypot(b.x - a.x, b.y - a.y);
+    if (r > 0.02) {
+      const centerId = addPointEntity(a.x, a.y);
+      const circleId = addCircleEntity(centerId, r);
+      sketch.shapes.push({ kind: 'circle', circleId });
+      solveSketch();
+    }
+  }
+  sketch.dragStart = null;
+  sketch.dragCurrent = null;
+}
+
+function closeCurrentPolyline() {
+  if (sketch.currentPointIds.length > 2) {
+    const firstId = sketch.currentPointIds[0];
+    const lastId = sketch.currentPointIds[sketch.currentPointIds.length - 1];
+    addLineEntity(lastId, firstId);
+    sketch.shapes.push({ kind: 'polygon', pointIds: sketch.currentPointIds.slice() });
+  }
+  sketch.currentPointIds = [];
+  solveSketch();
+}
+
+function finishShape() { closeCurrentPolyline(); }
+
+function undoPoint() {
+  if (sketch.tool === 'line' && sketch.currentPointIds.length) {
+    const lastId = sketch.currentPointIds.pop();
+    // remove the line that led to this point (if any) and the point itself,
+    // but keep the point if it was reused from an earlier existing entity
+    for (const [lid, l] of sketch.entities) {
+      if (l.type === 'line' && l.p2_id === lastId && sketch.currentPointIds.includes(l.p1_id)) {
+        sketch.entities.delete(lid);
+      }
+    }
+    drawSketch();
+  } else if (sketch.shapes.length) {
+    sketch.shapes.pop();
+    solveSketch();
+  }
+}
+
+// -- Hit-testing on the sketch canvas (screen px) for the Éditer/Contraintes tools --
+function findNearbyPointEntity(px, py, tolerance = 14) {
+  let best = null, bestDist = tolerance;
+  for (const e of sketch.entities.values()) {
+    if (e.type !== 'point' || e.ref) continue;
+    const s = planeUnitsToScreen(e.x, e.y);
+    const d = Math.hypot(s.x - px, s.y - py);
+    if (d < bestDist) { bestDist = d; best = e; }
+  }
+  return best;
+}
+
+function distToSegment(px, py, x1, y1, x2, y2) {
+  const dx = x2 - x1, dy = y2 - y1;
+  const len2 = dx * dx + dy * dy;
+  let t = len2 > 0 ? ((px - x1) * dx + (py - y1) * dy) / len2 : 0;
+  t = Math.max(0, Math.min(1, t));
+  return Math.hypot(px - (x1 + t * dx), py - (y1 + t * dy));
+}
+
+function hitTestEntity(px, py) {
+  const p = findNearbyPointEntity(px, py, 16);
+  if (p) return { kind: 'point', id: p.id };
+
+  let best = null, bestDist = 12;
+  for (const e of sketch.entities.values()) {
+    if (e.type !== 'line' || e.ref) continue;
+    const p1 = sketch.entities.get(e.p1_id), p2 = sketch.entities.get(e.p2_id);
+    if (!p1 || !p2) continue;
+    const s1 = planeUnitsToScreen(p1.x, p1.y), s2 = planeUnitsToScreen(p2.x, p2.y);
+    const d = distToSegment(px, py, s1.x, s1.y, s2.x, s2.y);
+    if (d < bestDist) { bestDist = d; best = e; }
+  }
+  if (best) return { kind: 'line', id: best.id };
+
+  bestDist = 12; best = null;
+  for (const e of sketch.entities.values()) {
+    if (e.type !== 'circle') continue;
+    const c = sketch.entities.get(e.c_id);
+    if (!c) continue;
+    const cs = planeUnitsToScreen(c.x, c.y);
+    const rs = planeUnitsToScreen(c.x + e.radius, c.y);
+    const screenR = Math.hypot(rs.x - cs.x, rs.y - cs.y);
+    const d = Math.abs(Math.hypot(px - cs.x, py - cs.y) - screenR);
+    if (d < bestDist) { bestDist = d; best = e; }
+  }
+  if (best) return { kind: 'circle', id: best.id };
+
+  return null;
+}
+
+// -- Snapping helpers --------------------------------------------------------
+function applySnap(pt) {
+  if (!sketch.snap) return pt;
+  const step = sketch.gridStep;
+  return { x: Math.round(pt.x / step) * step, y: Math.round(pt.y / step) * step };
+}
+
+// Soft horizontal/vertical lock while drawing a polyline segment: if the new
+// point is within a small angular tolerance of horizontal/vertical relative
+// to the previous point, snap it exactly onto that axis and report which.
+function applyAxisLock(pt) {
+  if (!sketch.currentPointIds.length) return { pt, locked: null };
+  const prev = sketch.entities.get(sketch.currentPointIds[sketch.currentPointIds.length - 1]);
+  if (!prev) return { pt, locked: null };
+  const dx = pt.x - prev.x, dy = pt.y - prev.y;
+  const dist = Math.hypot(dx, dy);
+  if (dist < 1e-6) return { pt, locked: null };
+  const angle = Math.abs(Math.atan2(dy, dx));
+  const TOL = THREE.MathUtils.degToRad(4);
+  if (angle < TOL || Math.abs(angle - Math.PI) < TOL) return { pt: { x: pt.x, y: prev.y }, locked: 'h' };
+  if (Math.abs(angle - Math.PI / 2) < TOL) return { pt: { x: prev.x, y: pt.y }, locked: 'v' };
+  return { pt, locked: null };
+}
+
+function drawSketch() {
+  if (!sketch.plane) return;
+  const ctx = sketchCtx;
+  const w = sketchEl.width, h = sketchEl.height;
+  ctx.clearRect(0, 0, w, h);
+
+  // grid, aligned to the actual 3D sketch plane, clipped to what's actually
+  // visible (computed by unprojecting the canvas corners onto the plane).
+  const bounds = getVisiblePlaneBounds();
+  const step = sketch.gridStep;
+  const minU = Math.floor(bounds.minU / step) * step, maxU = Math.ceil(bounds.maxU / step) * step;
+  const minV = Math.floor(bounds.minV / step) * step, maxV = Math.ceil(bounds.maxV / step) * step;
+  const maxLines = 400; // safety cap so a degenerate/near-edge-on view never floods the canvas
+  ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+  ctx.lineWidth = 1;
+  let nU = Math.round((maxU - minU) / step), nV = Math.round((maxV - minV) / step);
+  if (nU >= 0 && nU <= maxLines) {
+    for (let gu = minU; gu <= maxU + step / 2; gu += step) {
+      const p1 = planeUnitsToScreen(gu, minV), p2 = planeUnitsToScreen(gu, maxV);
+      ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.stroke();
+    }
+  }
+  if (nV >= 0 && nV <= maxLines) {
+    for (let gv = minV; gv <= maxV + step / 2; gv += step) {
+      const p1 = planeUnitsToScreen(minU, gv), p2 = planeUnitsToScreen(maxU, gv);
+      ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.stroke();
+    }
+  }
+  // axes
+  ctx.strokeStyle = 'rgba(79,209,197,0.55)';
+  ctx.lineWidth = 1.5;
+  let a1 = planeUnitsToScreen(minU, 0), a2 = planeUnitsToScreen(maxU, 0);
+  ctx.beginPath(); ctx.moveTo(a1.x, a1.y); ctx.lineTo(a2.x, a2.y); ctx.stroke();
+  a1 = planeUnitsToScreen(0, minV); a2 = planeUnitsToScreen(0, maxV);
+  ctx.beginPath(); ctx.moveTo(a1.x, a1.y); ctx.lineTo(a2.x, a2.y); ctx.stroke();
+
+  // all entities (points/lines/circles), reflecting live (possibly solved) positions
+  const isSelected = (kind, id) => sketch.selection.some(s => s.kind === kind && s.id === id);
+
+  // lines
+  ctx.lineWidth = 2.5;
+  for (const e of sketch.entities.values()) {
+    if (e.type !== 'line' || e.ref) continue;
+    const p1 = sketch.entities.get(e.p1_id), p2 = sketch.entities.get(e.p2_id);
+    if (!p1 || !p2) continue;
+    const s1 = planeUnitsToScreen(p1.x, p1.y), s2 = planeUnitsToScreen(p2.x, p2.y);
+    ctx.strokeStyle = isSelected('line', e.id) ? '#ff8a65' : '#4fd1c5';
+    ctx.beginPath(); ctx.moveTo(s1.x, s1.y); ctx.lineTo(s2.x, s2.y); ctx.stroke();
+  }
+  // circles
+  for (const e of sketch.entities.values()) {
+    if (e.type !== 'circle') continue;
+    const c = sketch.entities.get(e.c_id);
+    if (!c) continue;
+    ctx.strokeStyle = isSelected('circle', e.id) ? '#ff8a65' : '#4fd1c5';
+    ctx.beginPath();
+    const N = 48;
+    for (let i = 0; i <= N; i++) {
+      const t = (i / N) * Math.PI * 2;
+      const pt = planeUnitsToScreen(c.x + Math.cos(t) * e.radius, c.y + Math.sin(t) * e.radius);
+      if (i === 0) ctx.moveTo(pt.x, pt.y); else ctx.lineTo(pt.x, pt.y);
+    }
+    ctx.stroke();
+  }
+  // points
+  for (const e of sketch.entities.values()) {
+    if (e.type !== 'point' || e.ref) continue;
+    const s = planeUnitsToScreen(e.x, e.y);
+    const sel = isSelected('point', e.id);
+    ctx.beginPath(); ctx.arc(s.x, s.y, sel ? 6 : 4, 0, Math.PI * 2);
+    ctx.fillStyle = sel ? '#ff8a65' : (sketch.tool === 'edit' ? '#ffd166' : '#4fd1c5');
+    ctx.fill();
+  }
+
+  // Persistent dimension annotations (length of every line, radius of every
+  // circle) — the "cotes" screen: always visible for reference, and tappable
+  // in the Éditer/Contraintes tools to type an exact value directly.
+  sketch.dimHitboxes = [];
+  if (sketch.showDimensions) drawDimensionAnnotations(ctx);
+
+  // in-progress polyline preview (line tool)
+  if (sketch.currentPointIds.length) {
+    ctx.strokeStyle = '#ffd166';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    sketch.currentPointIds.forEach((pid, i) => {
+      const p = sketch.entities.get(pid);
+      const px = planeUnitsToScreen(p.x, p.y);
+      if (i === 0) ctx.moveTo(px.x, px.y); else ctx.lineTo(px.x, px.y);
+    });
+    if (sketch.hoverPoint) {
+      const px = planeUnitsToScreen(sketch.hoverPoint.x, sketch.hoverPoint.y);
+      ctx.lineTo(px.x, px.y);
+    }
+    ctx.stroke();
+    // live length readout on the last segment
+    if (sketch.hoverPoint) {
+      const last = sketch.entities.get(sketch.currentPointIds[sketch.currentPointIds.length - 1]);
+      const len = Math.hypot(sketch.hoverPoint.x - last.x, sketch.hoverPoint.y - last.y);
+      const mid = planeUnitsToScreen((last.x + sketch.hoverPoint.x) / 2, (last.y + sketch.hoverPoint.y) / 2);
+      ctx.fillStyle = '#ffd166';
+      ctx.font = '12px sans-serif';
+      ctx.fillText(len.toFixed(2), mid.x + 6, mid.y - 6);
+    }
+  }
+
+  // preview for rect/circle
+  if (sketch.dragStart) {
+    const s0 = planeUnitsToScreen(sketch.dragStart.x, sketch.dragStart.y);
+    ctx.beginPath(); ctx.arc(s0.x, s0.y, 5, 0, Math.PI * 2);
+    ctx.fillStyle = '#ffd166'; ctx.fill();
+  }
+  if (sketch.dragStart && sketch.dragCurrent) {
+    ctx.strokeStyle = '#ffd166';
+    ctx.lineWidth = 2;
+    if (sketch.tool === 'rect') {
+      const a = sketch.dragStart, b = sketch.dragCurrent;
+      const p00 = planeUnitsToScreen(a.x, a.y), p10 = planeUnitsToScreen(b.x, a.y);
+      const p11 = planeUnitsToScreen(b.x, b.y), p01 = planeUnitsToScreen(a.x, b.y);
+      ctx.beginPath();
+      ctx.moveTo(p00.x, p00.y); ctx.lineTo(p10.x, p10.y); ctx.lineTo(p11.x, p11.y); ctx.lineTo(p01.x, p01.y); ctx.closePath();
+      ctx.stroke();
+    } else if (sketch.tool === 'circle') {
+      const a = sketch.dragStart, b = sketch.dragCurrent;
+      const r = Math.hypot(b.x - a.x, b.y - a.y);
+      ctx.beginPath();
+      const N = 40;
+      for (let i = 0; i <= N; i++) {
+        const t = (i / N) * Math.PI * 2;
+        const pt = planeUnitsToScreen(a.x + Math.cos(t) * r, a.y + Math.sin(t) * r);
+        if (i === 0) ctx.moveTo(pt.x, pt.y); else ctx.lineTo(pt.x, pt.y);
+      }
+      ctx.stroke();
+    }
+  }
+}
+
+// Draws a small readable label for every line's length and every circle's
+// radius, and records their screen hitboxes (in sketch.dimHitboxes) so a tap
+// on one can be detected by hitTestDimension() and turned into an exact value.
+function drawDimensionAnnotations(ctx) {
+  ctx.font = '11.5px sans-serif';
+  ctx.textBaseline = 'middle';
+
+  function drawLabel(text, cx, cy, kind, id) {
+    const padX = 5, padY = 3;
+    const w = ctx.measureText(text).width + padX * 2;
+    const h = 15 + padY;
+    ctx.fillStyle = 'rgba(20,24,31,0.85)';
+    ctx.fillRect(cx - w / 2, cy - h / 2, w, h);
+    ctx.strokeStyle = 'rgba(255,209,102,0.6)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(cx - w / 2, cy - h / 2, w, h);
+    ctx.fillStyle = '#ffd166';
+    ctx.textAlign = 'center';
+    ctx.fillText(text, cx, cy + 0.5);
+    sketch.dimHitboxes.push({ x: cx - w / 2, y: cy - h / 2, w, h, kind, id });
+  }
+
+  for (const e of sketch.entities.values()) {
+    if (e.type === 'line' && !e.ref) {
+      const p1 = sketch.entities.get(e.p1_id), p2 = sketch.entities.get(e.p2_id);
+      if (!p1 || !p2) continue;
+      const len = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+      if (len < 1e-4) continue;
+      const s1 = planeUnitsToScreen(p1.x, p1.y), s2 = planeUnitsToScreen(p2.x, p2.y);
+      const mx = (s1.x + s2.x) / 2, my = (s1.y + s2.y) / 2;
+      // offset perpendicular to the segment so the label doesn't sit on the line
+      const dx = s2.x - s1.x, dy = s2.y - s1.y;
+      const segLen = Math.hypot(dx, dy) || 1;
+      const ox = -dy / segLen * 14, oy = dx / segLen * 14;
+      drawLabel(len.toFixed(2), mx + ox, my + oy, 'line', e.id);
+    } else if (e.type === 'circle') {
+      const c = sketch.entities.get(e.c_id);
+      if (!c) continue;
+      const pt = planeUnitsToScreen(c.x + e.radius * Math.cos(-Math.PI / 4), c.y + e.radius * Math.sin(-Math.PI / 4));
+      drawLabel('R' + e.radius.toFixed(2), pt.x, pt.y, 'circle', e.id);
+    }
+  }
+}
+
+function hitTestDimension(px, py) {
+  for (const box of sketch.dimHitboxes) {
+    if (px >= box.x && px <= box.x + box.w && py >= box.y && py <= box.y + box.h) return box;
+  }
+  return null;
+}
+
+// Sets (or updates, if one already exists) the length constraint on a line,
+// and the radius constraint on a circle — used both by the dimension labels
+// (tap-to-edit) and reusable anywhere a direct value needs to be applied.
+function setLineLength(lineId, value) {
+  const l = sketch.entities.get(lineId);
+  if (!l) return;
+  const existing = [...sketch.constraints.values()].find(c => c.type === 'p2p_distance' &&
+    ((c.p1_id === l.p1_id && c.p2_id === l.p2_id) || (c.p1_id === l.p2_id && c.p2_id === l.p1_id)));
+  if (existing) existing.distance = value;
+  else addConstraintPrimitive('p2p_distance', { p1_id: l.p1_id, p2_id: l.p2_id, distance: value });
+  solveSketch();
+  renderConstraintPanel();
+}
+function setCircleRadius(circleId, value) {
+  const existing = [...sketch.constraints.values()].find(c => c.type === 'circle_radius' && c.c_id === circleId);
+  if (existing) existing.radius = value;
+  else addConstraintPrimitive('circle_radius', { c_id: circleId, radius: value });
+  solveSketch();
+  renderConstraintPanel();
+}
+
+// ---------------------------------------------------------------------------
+// Extrude / Revolve
+// ---------------------------------------------------------------------------
+// Builds a THREE.Shape for each finished sketch shape, reading LIVE (solved)
+// entity coordinates — this is what makes extrude/revolve stay correct after
+// the constraint solver has moved things around.
+function buildShapesForExtrude() {
+  const result = [];
+  sketch.shapes.forEach(s => {
+    if (s.kind === 'polygon') {
+      const pts = s.pointIds.map(pid => sketch.entities.get(pid)).filter(Boolean);
+      if (pts.length < 3) return;
+      result.push(new THREE.Shape(pts.map(p => new THREE.Vector2(p.x, p.y))));
+    } else if (s.kind === 'circle') {
+      const c = sketch.entities.get(s.circleId);
+      const center = c && sketch.entities.get(c.c_id);
+      if (!c || !center) return;
+      const shape = new THREE.Shape();
+      shape.absarc(center.x, center.y, c.radius, 0, Math.PI * 2, false);
+      result.push(shape);
+    }
+  });
+  return result;
+}
+
+// Same, but for revolve: returns arrays of Vector2(radius, height) profile
+// points, clamped to radius ≥ 0 (revolve axis = plane's local Y / v-axis).
+function buildProfilesForRevolve() {
+  const result = [];
+  sketch.shapes.forEach(s => {
+    if (s.kind === 'polygon') {
+      const pts = s.pointIds.map(pid => sketch.entities.get(pid)).filter(Boolean);
+      if (pts.length < 2) return;
+      result.push(pts.map(p => new THREE.Vector2(Math.max(0, p.x), p.y)));
+    } else if (s.kind === 'circle') {
+      const c = sketch.entities.get(s.circleId);
+      const center = c && sketch.entities.get(c.c_id);
+      if (!c || !center) return;
+      // A circle revolved around the plane's Y axis becomes a torus profile:
+      // approximate it as a closed polygon profile (radius ≥ 0 clamped).
+      const N = 32, pts = [];
+      for (let i = 0; i <= N; i++) {
+        const t = (i / N) * Math.PI * 2;
+        pts.push(new THREE.Vector2(Math.max(0, center.x + Math.cos(t) * c.radius), center.y + Math.sin(t) * c.radius));
+      }
+      result.push(pts);
+    }
+  });
+  return result;
+}
+
+function requestExtrude() {
+  if (!buildShapesForExtrude().length) { flashHint('Dessinez au moins une forme fermée d\'abord.'); return; }
+  const prevDepth = (sketch.editingEntry && sketch.editingEntry.sketchData && sketch.editingEntry.sketchData.resultType !== 'revolve')
+    ? sketch.editingEntry.sketchData.param : 1;
+  openExtrudeModal({
+    title: 'Extrusion / Perçage',
+    valueLabel: 'Profondeur',
+    defaultVal: prevDepth,
+    hasParent: !!sketch.plane.parentEntry,
+    onConfirm: (depth, intent) => doExtrude(depth, intent)
+  });
+}
+
+function requestRevolve() {
+  if (!buildProfilesForRevolve().length) { flashHint('Dessinez un profil d\'abord (x ≥ 0 recommandé).'); return; }
+  const prevSegments = (sketch.editingEntry && sketch.editingEntry.sketchData && sketch.editingEntry.sketchData.resultType === 'revolve')
+    ? sketch.editingEntry.sketchData.param : 32;
+  openExtrudeModal({
+    title: 'Révolution',
+    valueLabel: 'Segments',
+    defaultVal: prevSegments,
+    hasParent: !!sketch.plane.parentEntry,
+    onConfirm: (segments, intent) => doRevolve(Math.max(6, Math.round(segments)), intent)
+  });
+}
+
+// Maps a mesh built in plane-local coordinates (x,y in-plane, z = extrude
+// direction) into world space, using the current sketch plane as basis.
+function orientMeshToPlane(mesh, plane) {
+  const m = new THREE.Matrix4().makeBasis(plane.xAxis, plane.yAxis, plane.normal);
+  mesh.quaternion.setFromRotationMatrix(m);
+  mesh.position.copy(plane.origin);
+}
+
+function doExtrude(depth, intent) {
+  const shapes = buildShapesForExtrude();
+  const d = Math.max(0.01, depth);
+  const geos = [];
+  shapes.forEach(shape => {
+    const geo = new THREE.ExtrudeGeometry(shape, { depth: d, bevelEnabled: false });
+    // For a cavity, dig INTO the solid: shift the extrusion from [0,d] to
+    // [-d,0] along the local Z axis, i.e. against the face normal.
+    if (intent === 'cut') geo.translate(0, 0, -d);
+    geos.push(geo);
+  });
+  const merged = mergeGeometries(geos);
+  const mesh = new THREE.Mesh(merged, makeMaterial());
+  finishSketchResult(mesh, intent === 'cut' ? 'pocket' : 'extrude', intent, d);
+}
+
+function doRevolve(segments, intent) {
+  const profiles = buildProfilesForRevolve();
+  const geos = [];
+  profiles.forEach(pts2 => {
+    if (pts2.length < 2) return;
+    const geo = new THREE.LatheGeometry(pts2, segments);
+    geos.push(geo);
+  });
+  if (!geos.length) { flashHint('Profil invalide pour une révolution.'); return; }
+  const merged = mergeGeometries(geos);
+  const mesh = new THREE.Mesh(merged, makeMaterial());
+  finishSketchResult(mesh, intent === 'cut' ? 'pocket' : 'revolve', intent, segments);
+}
+
+function mergeGeometries(geos) {
+  if (geos.length === 1) return geos[0];
+  try {
+    return mergeGeoms(geos, false);
+  } catch (e) {
+    return geos[0];
+  }
+}
+
+// Snapshots the current sketch (plane + entities + constraints + shapes) into
+// a plain, JSON-safe object attached to the resulting 3D object. This is what
+// makes an extrude/revolve result re-editable later, and what gets persisted
+// by Save/Load — without it, only the final mesh would survive a reload.
+function captureSketchData(resultType, intent, param) {
+  const plane = sketch.plane;
+  return {
+    plane: {
+      origin: plane.origin.toArray(),
+      normal: plane.normal.toArray(),
+      xAxis: plane.xAxis.toArray(),
+      yAxis: plane.yAxis.toArray()
+    },
+    entities: [...sketch.entities.values()].map(e => ({ ...e })),
+    constraints: [...sketch.constraints.values()].map(c => ({ ...c })),
+    shapes: JSON.parse(JSON.stringify(sketch.shapes)),
+    resultType, intent, param
+  };
+}
+
+function finishSketchResult(mesh, type, intent, param) {
+  const plane = sketch.plane;
+  orientMeshToPlane(mesh, plane);
+  const parentEntry = plane.parentEntry;
+  const editingEntry = sketch.editingEntry;
+  const sketchData = captureSketchData(type, intent, param);
+  exitSketchMode();
+
+  const paramTxt = type === 'revolve' ? `${param} segments` : `profondeur ${param}`;
+
+  if (editingEntry && objects.includes(editingEntry)) {
+    // Re-editing an existing sketch-based object: update it in place instead
+    // of creating a duplicate.
+    editingEntry.mesh.geometry.dispose();
+    editingEntry.mesh.geometry = mesh.geometry;
+    editingEntry.mesh.position.copy(mesh.position);
+    editingEntry.mesh.quaternion.copy(mesh.quaternion);
+    editingEntry.sketchData = sketchData;
+    selectObject(editingEntry);
+    renderObjectList();
+    logHistory(`Esquisse modifiée : « ${editingEntry.name} » (${paramTxt})`);
+    return;
+  }
+
+  const newEntry = registerObject(mesh, prettyName(type));
+  newEntry.sketchData = sketchData;
+  const verb = type === 'pocket' ? 'Perçage' : type === 'revolve' ? 'Révolution' : 'Extrusion';
+  logHistory(`${verb} créée : « ${newEntry.name} » (${paramTxt})`);
+  if (parentEntry && objects.includes(parentEntry) && intent !== 'separate') {
+    performBoolean(parentEntry, newEntry, intent === 'cut' ? 'subtract' : 'union');
+  }
+}
+
+// Re-opens the sketch that produced a given object, restoring its entities
+// and constraints so it can be edited, then re-extruded/revolved to update
+// the object in place (see finishSketchResult).
+function editObjectSketch(entry) {
+  if (mode !== 'model') { flashHint('Terminez ou quittez l\'esquisse en cours d\'abord.'); return; }
+  const sd = entry.sketchData;
+  if (!sd) return;
+  const origin = new THREE.Vector3().fromArray(sd.plane.origin);
+  const normal = new THREE.Vector3().fromArray(sd.plane.normal);
+  const xAxis = new THREE.Vector3().fromArray(sd.plane.xAxis);
+  const yAxis = new THREE.Vector3().fromArray(sd.plane.yAxis);
+  const plane = {
+    origin, normal, xAxis, yAxis,
+    threePlane: new THREE.Plane().setFromNormalAndCoplanarPoint(normal, origin),
+    parentEntry: null,
+    label: 'modification de « ' + entry.name + ' »'
+  };
+  enterSketchModeOnPlane(plane);
+  sketch.entities = new Map(sd.entities.map(e => [e.id, { ...e }]));
+  sketch.constraints = new Map(sd.constraints.map(c => [c.id, { ...c }]));
+  sketch.shapes = JSON.parse(JSON.stringify(sd.shapes));
+  // Reuse the restored hidden reference line (for "angle to horizontal"), if any.
+  for (const e of sketch.entities.values()) {
+    if (e.type === 'line' && e.ref) { sketch.refLineId = e.id; break; }
+  }
+  const allIds = [...sketch.entities.keys(), ...sketch.constraints.keys()].map(Number).filter(n => !isNaN(n));
+  sketch.nextId = (allIds.length ? Math.max(...allIds) : 0) + 1;
+  sketch.editingEntry = entry;
+  document.getElementById('status-left').textContent = `Modification de « ${entry.name} »`;
+  solveSketch();
+}
+
+// Single modal combining the numeric value (depth/segments) with the
+// pad/pocket/separate choice when relevant, instead of two sequential popups.
+function openExtrudeModal(opts) {
+  const wrap = document.getElementById('extrude-modal');
+  document.getElementById('em-title').textContent = opts.title;
+  document.getElementById('em-label').textContent = opts.valueLabel;
+  const input = document.getElementById('em-value');
+  input.value = opts.defaultVal;
+  document.getElementById('em-intent-row').style.display = opts.hasParent ? 'flex' : 'none';
+  document.getElementById('em-simple-row').style.display = opts.hasParent ? 'none' : 'flex';
+  wrap.classList.add('show');
+
+  const addBtn = document.getElementById('em-add');
+  const cutBtn = document.getElementById('em-cut');
+  const sepBtn = document.getElementById('em-separate');
+  const confirmBtn = document.getElementById('em-confirm');
+  const cancelBtn = document.getElementById('em-cancel');
+
+  function cleanup() {
+    wrap.classList.remove('show');
+    addBtn.removeEventListener('click', onAdd);
+    cutBtn.removeEventListener('click', onCut);
+    sepBtn.removeEventListener('click', onSep);
+    confirmBtn.removeEventListener('click', onConfirmSimple);
+    cancelBtn.removeEventListener('click', onCancel);
+  }
+  function getVal() { return parseFloat(input.value); }
+  function submit(intent) { const v = getVal(); cleanup(); if (!isNaN(v)) opts.onConfirm(v, intent); }
+  function onAdd() { submit('add'); }
+  function onCut() { submit('cut'); }
+  function onSep() { submit('separate'); }
+  function onConfirmSimple() { submit('separate'); }
+  function onCancel() { cleanup(); }
+
+  addBtn.addEventListener('click', onAdd);
+  cutBtn.addEventListener('click', onCut);
+  sepBtn.addEventListener('click', onSep);
+  confirmBtn.addEventListener('click', onConfirmSimple);
+  cancelBtn.addEventListener('click', onCancel);
+}
+
+
+
+function flashHint(msg) {
+  const hint = document.getElementById('hint');
+  hint.textContent = msg;
+  hint.style.color = '#ffd166';
+  setTimeout(() => { hint.style.color = ''; }, 1500);
+}
+
+// ---------------------------------------------------------------------------
+// Dimension input popup (used for extrude depth / revolve segments)
+// ---------------------------------------------------------------------------
+function openDimInput(label, defaultVal, onOk) {
+  const wrap = document.getElementById('dim-input');
+  document.getElementById('dim-label').textContent = label;
+  const input = document.getElementById('dim-value');
+  input.value = defaultVal;
+  wrap.classList.add('show');
+
+  const ok = document.getElementById('dim-ok');
+  const cancel = document.getElementById('dim-cancel');
+
+  function cleanup() {
+    wrap.classList.remove('show');
+    ok.removeEventListener('click', okHandler);
+    cancel.removeEventListener('click', cancelHandler);
+  }
+  function okHandler() {
+    const v = parseFloat(input.value);
+    cleanup();
+    if (!isNaN(v)) onOk(v);
+  }
+  function cancelHandler() { cleanup(); }
+
+  ok.addEventListener('click', okHandler);
+  cancel.addEventListener('click', cancelHandler);
+}
+
+// ---------------------------------------------------------------------------
+// Boolean operations
+// ---------------------------------------------------------------------------
+function startBoolean(op) {
+  if (objects.length < 2) { flashHint('Il faut au moins deux objets.'); return; }
+  pendingBoolean = op;
+  booleanFirst = null;
+  const labels = { union: 'Union', subtract: 'Soustraction', intersect: 'Intersection' };
+  document.getElementById('status-left').textContent = `${labels[op]} — touchez le 1er objet`;
+  document.getElementById('hint').textContent = `${labels[op]} : touchez le premier objet (base), puis le second.`;
+}
+
+function handleBooleanPick(entry) {
+  if (!booleanFirst) {
+    booleanFirst = entry;
+    document.getElementById('status-left').textContent = 'Touchez le 2ᵉ objet';
+    selectObject(entry);
+    return;
+  }
+  if (entry === booleanFirst) { flashHint('Choisissez un objet différent.'); return; }
+  performBoolean(booleanFirst, entry, pendingBoolean);
+  pendingBoolean = null;
+  booleanFirst = null;
+  document.getElementById('status-left').textContent = 'Mode modélisation';
+  document.getElementById('hint').textContent = '';
+}
+
+function performBoolean(a, b, op) {
+  a.mesh.updateMatrixWo

@@ -2366,4 +2366,305 @@ function handleBooleanPick(entry) {
 }
 
 function performBoolean(a, b, op) {
-  a.mesh.updateMatrixWo
+  a.mesh.updateMatrixWorld(true);
+  b.mesh.updateMatrixWorld(true);
+
+  const brushA = new Brush(a.mesh.geometry.clone());
+  brushA.position.copy(a.mesh.position);
+  brushA.rotation.copy(a.mesh.rotation);
+  brushA.scale.copy(a.mesh.scale);
+  brushA.updateMatrixWorld();
+
+  const brushB = new Brush(b.mesh.geometry.clone());
+  brushB.position.copy(b.mesh.position);
+  brushB.rotation.copy(b.mesh.rotation);
+  brushB.scale.copy(b.mesh.scale);
+  brushB.updateMatrixWorld();
+
+  const OP = op === 'union' ? ADDITION : op === 'subtract' ? SUBTRACTION : INTERSECTION;
+  let result;
+  try {
+    result = evaluator.evaluate(brushA, brushB, OP);
+  } catch (err) {
+    flashHint('Opération booléenne impossible sur ces formes.');
+    return;
+  }
+
+  // `result` is a Brush (extends THREE.Mesh) with the combined geometry already
+  // baked into world space by the evaluator — safe to use directly.
+  const mesh = result;
+  mesh.material = makeMaterial();
+
+  const aName = a.name, bName = b.name;
+  transformControls.detach();
+  scene.remove(a.mesh); a.mesh.geometry.dispose(); a.mesh.material.dispose();
+  scene.remove(b.mesh); b.mesh.geometry.dispose(); b.mesh.material.dispose();
+  objects = objects.filter(o => o !== a && o !== b);
+
+  const opLabels = { union: 'Union', subtract: 'Soustraction', intersect: 'Intersection' };
+  const opSign = { union: '+', subtract: '−', intersect: '∩' };
+  const newEntry = registerObject(mesh, prettyName(op));
+  logHistory(`${opLabels[op]} : « ${aName} » ${opSign[op]} « ${bName} » → « ${newEntry.name} »`);
+}
+
+// ---------------------------------------------------------------------------
+// STL export
+// ---------------------------------------------------------------------------
+function exportSTL() {
+  if (!objects.length) { flashHint('Rien à exporter.'); return; }
+  const exporter = new STLExporter();
+  const target = selected ? selected.mesh : new THREE.Group().add(...objects.map(o => o.mesh.clone()));
+  target.updateMatrixWorld(true);
+  const result = exporter.parse(target, { binary: true });
+  const blob = new Blob([result], { type: 'application/octet-stream' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = (selected ? selected.name : 'scene').replace(/\s+/g, '_') + '.stl';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+}
+
+// ---------------------------------------------------------------------------
+// Save / Load (localStorage)
+// ---------------------------------------------------------------------------
+function saveProject() {
+  const data = objects.map(o => ({
+    name: o.name,
+    geometry: o.mesh.geometry.toJSON(),
+    position: o.mesh.position.toArray(),
+    rotation: o.mesh.rotation.toArray().slice(0, 3),
+    scale: o.mesh.scale.toArray(),
+    sketchData: o.sketchData || null,
+    primType: o.mesh.userData.primType || null,
+    primParams: o.mesh.userData.primParams || null
+  }));
+  try {
+    localStorage.setItem('minicad-project', JSON.stringify({ objects: data, history: historyLog }));
+    flashHint('Projet sauvegardé sur cet appareil (avec les esquisses).');
+    logHistory('— Projet sauvegardé —');
+  } catch (e) {
+    flashHint('Échec de la sauvegarde (stockage plein ?).');
+  }
+}
+
+function loadProject() {
+  const raw = localStorage.getItem('minicad-project');
+  if (!raw) { flashHint('Aucun projet sauvegardé.'); return; }
+  newProject(true);
+  const saved = JSON.parse(raw);
+  const data = Array.isArray(saved) ? saved : saved.objects; // back-compat with older saves
+  const loader = new THREE.BufferGeometryLoader();
+  data.forEach(d => {
+    const geo = loader.parse(d.geometry);
+    const mesh = new THREE.Mesh(geo, makeMaterial());
+    mesh.position.fromArray(d.position);
+    mesh.rotation.set(d.rotation[0], d.rotation[1], d.rotation[2]);
+    mesh.scale.fromArray(d.scale);
+    if (d.primType) { mesh.userData.primType = d.primType; mesh.userData.primParams = d.primParams; }
+    const entry = registerObject(mesh, d.name);
+    if (d.sketchData) entry.sketchData = d.sketchData;
+  });
+  if (!Array.isArray(saved) && saved.history) historyLog = saved.history;
+  flashHint('Projet chargé.');
+  logHistory(`— Projet chargé (${data.length} objet(s)) —`);
+}
+
+function newProject(silent) {
+  transformControls.detach();
+  objects.forEach(o => { scene.remove(o.mesh); o.mesh.geometry.dispose(); o.mesh.material.dispose(); });
+  objects = [];
+  selected = null;
+  nameCounters = {};
+  historyLog = [];
+  renderObjectList();
+  renderPropertiesPanel();
+  renderHistoryPanel();
+  if (!silent) { flashHint('Nouveau projet.'); logHistory('— Nouveau projet —'); }
+}
+
+// ---------------------------------------------------------------------------
+// UI wiring
+// ---------------------------------------------------------------------------
+function initUI() {
+  // Dropdown menus (Ajouter / Transformer / Booléen / Fichier)
+  const MENU_NAMES = ['add', 'transform', 'bool', 'file'];
+  const SK_MENU_NAMES = ['draw', 'actions', 'grid'];
+  function closeAllMenus() {
+    MENU_NAMES.forEach(n => document.getElementById('dropdown-' + n).classList.remove('show'));
+    SK_MENU_NAMES.forEach(n => document.getElementById('sk-dropdown-' + n).classList.remove('show'));
+    document.getElementById('prop-dropdown').classList.remove('show');
+    document.querySelectorAll('.menu-btn').forEach(b => b.classList.remove('open'));
+  }
+  function toggleMenu(name) {
+    const dd = document.getElementById('dropdown-' + name);
+    const isOpen = dd.classList.contains('show');
+    closeAllMenus();
+    if (!isOpen) {
+      dd.classList.add('show');
+      document.getElementById('menu-btn-' + name).classList.add('open');
+    }
+  }
+  function toggleSkMenu(name) {
+    const dd = document.getElementById('sk-dropdown-' + name);
+    const isOpen = dd.classList.contains('show');
+    closeAllMenus();
+    if (!isOpen) {
+      // Position it right below the sketch toolbar row (whose exact height
+      // varies with safe-area insets), computed live rather than hardcoded.
+      const bar = document.getElementById('sketch-toolbar');
+      dd.style.top = bar.getBoundingClientRect().bottom + 'px';
+      dd.classList.add('show');
+      document.getElementById('sk-menu-' + name).classList.add('open');
+    }
+  }
+  function togglePropDropdown() {
+    const dd = document.getElementById('prop-dropdown');
+    const isOpen = dd.classList.contains('show');
+    closeAllMenus();
+    if (!isOpen) {
+      // Drops down from the panel's tab row, spanning the panel's own width —
+      // computed live so it tracks the panel regardless of screen size.
+      const panelEl = document.getElementById('panel');
+      const tabsEl = document.getElementById('panel-tabs');
+      const panelRect = panelEl.getBoundingClientRect();
+      const tabsRect = tabsEl.getBoundingClientRect();
+      dd.style.top = tabsRect.bottom + 'px';
+      dd.style.left = panelRect.left + 'px';
+      dd.style.width = panelRect.width + 'px';
+      dd.classList.add('show');
+      document.getElementById('ptab-props-toggle').classList.add('open');
+    }
+  }
+  MENU_NAMES.forEach(n => {
+    document.getElementById('menu-btn-' + n).addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleMenu(n);
+    });
+  });
+  SK_MENU_NAMES.forEach(n => {
+    document.getElementById('sk-menu-' + n).addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleSkMenu(n);
+    });
+  });
+  document.getElementById('ptab-props-toggle').addEventListener('click', (e) => {
+    e.stopPropagation();
+    togglePropDropdown();
+  });
+  document.addEventListener('pointerdown', (e) => {
+    if (e.target.closest('.dropdown') || e.target.closest('.menu-btn')) return;
+    closeAllMenus();
+  });
+  // Any action button inside a dropdown closes the menu once tapped.
+  document.querySelectorAll('.dropdown button').forEach(btn => {
+    btn.addEventListener('click', closeAllMenus);
+  });
+
+  document.getElementById('add-box').addEventListener('click', () => addPrimitive('box'));
+  document.getElementById('add-cylinder').addEventListener('click', () => addPrimitive('cylinder'));
+  document.getElementById('add-sphere').addEventListener('click', () => addPrimitive('sphere'));
+  document.getElementById('add-cone').addEventListener('click', () => addPrimitive('cone'));
+
+  document.getElementById('btn-sketch').addEventListener('click', openPlaneChoice);
+  document.getElementById('btn-sketch-face').addEventListener('click', () => {
+    if (!objects.length) { flashHint('Créez d\'abord un objet.'); return; }
+    if (pickingFace) cancelFacePick(); else startFacePick();
+  });
+  document.getElementById('pc-ground').addEventListener('click', () => startPlaneSketch('ground'));
+  document.getElementById('pc-front').addEventListener('click', () => startPlaneSketch('front'));
+  document.getElementById('pc-side').addEventListener('click', () => startPlaneSketch('side'));
+  document.getElementById('pc-cancel').addEventListener('click', closePlaneChoice);
+
+  document.getElementById('btn-move').addEventListener('click', () => setTransformMode('translate'));
+  document.getElementById('btn-rotate').addEventListener('click', () => setTransformMode('rotate'));
+  document.getElementById('btn-scale').addEventListener('click', () => setTransformMode('scale'));
+
+  document.getElementById('btn-union').addEventListener('click', () => startBoolean('union'));
+  document.getElementById('btn-subtract').addEventListener('click', () => startBoolean('subtract'));
+  document.getElementById('btn-intersect').addEventListener('click', () => startBoolean('intersect'));
+
+  document.getElementById('btn-delete').addEventListener('click', deleteSelected);
+  document.getElementById('btn-export').addEventListener('click', exportSTL);
+  document.getElementById('btn-fit').addEventListener('click', fitView);
+
+  document.getElementById('btn-save').addEventListener('click', saveProject);
+  document.getElementById('btn-load').addEventListener('click', loadProject);
+  document.getElementById('btn-new').addEventListener('click', () => {
+    if (confirm('Effacer la scène actuelle ?')) newProject();
+  });
+
+  document.getElementById('panel-toggle').addEventListener('click', () => {
+    document.getElementById('panel').classList.toggle('hidden');
+    closeAllMenus();
+    // The panel toggle changes #viewport-wrap's available size without the
+    // window itself resizing, so the renderer/camera must be told explicitly —
+    // otherwise the WebGL canvas keeps its old resolution/aspect and looks wrong.
+    // Also re-assert the page's own size (see syncAppSize): this exact
+    // interaction has been observed to leave `100dvh` stuck at a stale value
+    // on Android Chrome, shrinking the whole app instead of just the canvas.
+    syncAppSize();
+    requestAnimationFrame(() => { syncAppSize(); onResize(); });
+  });
+
+  document.querySelectorAll('.ptab[data-tab]').forEach(btn => {
+    btn.addEventListener('click', () => switchPanelTab(btn.dataset.tab));
+  });
+
+  // Sketch toolbar
+  document.getElementById('sk-line').addEventListener('click', () => setSketchTool('line'));
+  document.getElementById('sk-rect').addEventListener('click', () => setSketchTool('rect'));
+  document.getElementById('sk-circle').addEventListener('click', () => setSketchTool('circle'));
+  document.getElementById('sk-edit').addEventListener('click', () => setSketchTool('edit'));
+  document.getElementById('sk-constrain').addEventListener('click', () => setSketchTool('constrain'));
+  document.getElementById('sk-finish').addEventListener('click', finishShape);
+  document.getElementById('sk-undo').addEventListener('click', undoPoint);
+  document.getElementById('sk-snap').addEventListener('click', () => {
+    sketch.snap = !sketch.snap;
+    document.getElementById('sk-snap').classList.toggle('active', sketch.snap);
+  });
+  document.getElementById('sk-gridstep').addEventListener('change', (e) => {
+    sketch.gridStep = parseFloat(e.target.value);
+    drawSketch();
+  });
+  document.getElementById('sk-dims').addEventListener('click', () => {
+    sketch.showDimensions = !sketch.showDimensions;
+    document.getElementById('sk-dims').classList.toggle('active', sketch.showDimensions);
+    drawSketch();
+  });
+  document.getElementById('sk-extrude').addEventListener('click', requestExtrude);
+  document.getElementById('sk-revolve').addEventListener('click', requestRevolve);
+  document.getElementById('sk-exit').addEventListener('click', () => {
+    exitSketchMode();
+  });
+
+  updateButtonStates();
+}
+
+function setTransformMode(m) {
+  if (!selected) { flashHint('Sélectionnez un objet d\'abord.'); return; }
+  transformControls.setMode(m);
+  ['btn-move', 'btn-rotate', 'btn-scale'].forEach(id => document.getElementById(id).classList.remove('active'));
+  const map = { translate: 'btn-move', rotate: 'btn-rotate', scale: 'btn-scale' };
+  document.getElementById(map[m]).classList.add('active');
+}
+
+function updateButtonStates() {
+  const has = !!selected;
+  ['btn-move', 'btn-rotate', 'btn-scale', 'btn-delete', 'btn-export'].forEach(id => {
+    document.getElementById(id).disabled = false; // export/boolean allowed generally; keep enabled, hints guide the user
+  });
+}
+
+</script>
+<script>
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('sw.js').catch(() => {});
+    });
+  }
+</script>
+</body>
+</html>

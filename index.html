@@ -20,7 +20,7 @@
     --safe-top: env(safe-area-inset-top); --safe-bottom: env(safe-area-inset-bottom);
   }
   *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
-  html,body{height:100%; width:100%; margin:0; overscroll-behavior:none;}
+  html,body{height:100%; width:100%; margin:0; overscroll-behavior:none; touch-action:pan-x pan-y;}
   html{
     /* Disables Chrome's automatic text-size adjustment ("font boosting"),
        which can mis-fire and shrink text after a dynamic layout change like
@@ -334,6 +334,36 @@
   });
   push('info', ['Debug logger initialisé.']);
 
+  // Hard-block pinch-zoom through every mechanism a mobile/embedded browser
+  // might use to trigger it — CSS touch-action alone hasn't been enough in
+  // this app's "content://" local-file viewing context, so this backs it up
+  // at the JS level too. Harmless everywhere else since the app doesn't use
+  // multi-touch gestures, double-tap, or wheel+ctrl for anything itself.
+  document.addEventListener('touchmove', function (e) {
+    if (e.touches && e.touches.length > 1) e.preventDefault();
+  }, { passive: false });
+  document.addEventListener('gesturestart', function (e) { e.preventDefault(); });
+  document.addEventListener('gesturechange', function (e) { e.preventDefault(); });
+  document.addEventListener('dblclick', function (e) { e.preventDefault(); });
+  document.addEventListener('wheel', function (e) {
+    if (e.ctrlKey) e.preventDefault();
+  }, { passive: false });
+
+  // Watch for an actual zoom (visualViewport.scale != 1) so a debug report
+  // can confirm — rather than guess — whether this recurring "tiny UI" bug
+  // is really the page being zoomed, and by how much.
+  window.__minicadLastScale = 1;
+  if (window.visualViewport) {
+    window.__minicadLastScale = window.visualViewport.scale;
+    window.visualViewport.addEventListener('resize', function () {
+      var s = window.visualViewport.scale;
+      if (Math.abs(s - window.__minicadLastScale) > 0.01) {
+        push('warn', ['visualViewport.scale a changé : ' + window.__minicadLastScale.toFixed(2) + ' → ' + s.toFixed(2)]);
+      }
+      window.__minicadLastScale = s;
+    });
+  }
+
   function gatherDebugText() {
     var lines = [];
     lines.push('=== MiniCAD — rapport de débogage ===');
@@ -341,7 +371,11 @@
     lines.push('URL : ' + location.href);
     lines.push('User-Agent : ' + navigator.userAgent);
     lines.push('Fenêtre : ' + window.innerWidth + 'x' + window.innerHeight + ' (devicePixelRatio=' + window.devicePixelRatio + ')');
-    if (window.visualViewport) lines.push('visualViewport : ' + window.visualViewport.width + 'x' + window.visualViewport.height + ' scale=' + window.visualViewport.scale);
+    if (window.visualViewport) {
+      var scale = window.visualViewport.scale;
+      var zoomFlag = (Math.abs(scale - 1) > 0.02) ? '  ⚠ ZOOM ACTIF (≠ 1) — c\'est probablement la cause de l\'interface minuscule' : '  (normal)';
+      lines.push('visualViewport : ' + window.visualViewport.width + 'x' + window.visualViewport.height + ' scale=' + scale.toFixed(3) + zoomFlag);
+    }
     try {
       var c = document.createElement('canvas');
       var gl = c.getContext('webgl2') || c.getContext('webgl');

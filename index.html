@@ -190,6 +190,13 @@
   #obj-list li button.vis-off{ opacity:.4; }
   #obj-list .empty{ color:var(--text-dim); font-size:12px; padding:8px; }
 
+  .tree-toggle{ width:14px; flex-shrink:0; color:var(--text-dim); font-size:10px; text-align:center; cursor:pointer; }
+  .tree-icon{ flex-shrink:0; font-size:13px; }
+  #obj-list li.ghost{
+    background:none; border:1px dashed var(--line); opacity:.65;
+  }
+  #obj-list li.ghost .name{ color:var(--text-dim); font-style:italic; }
+
   #history-list{ list-style:none; margin:0; padding:0 8px; overflow-y:auto; flex:1; }
   #history-list li{
     padding:7px 8px; border-radius:8px; margin-bottom:3px; background:var(--bg2);
@@ -309,6 +316,7 @@
   <button class="tool menu-btn" id="sk-menu-actions" data-skmenu="actions">⚡ Actions ▾</button>
   <button class="tool menu-btn" id="sk-menu-grid" data-skmenu="grid">🧲 Grille ▾</button>
   <div class="sep"></div>
+  <button class="tool" id="sk-finish">✓ Terminé</button>
   <button class="tool" id="sk-extrude">⬆ Extrusion / Perçage</button>
   <button class="tool" id="sk-revolve">🌀 Révolution</button>
   <div class="sep"></div>
@@ -329,7 +337,6 @@
 
 <div id="sk-dropdown-actions" class="dropdown sk-dropdown">
   <div class="dd-row">
-    <button class="tool" id="sk-finish">✔ Fermer</button>
     <button class="tool" id="sk-undo">↺ Annuler point</button>
   </div>
 </div>
@@ -740,6 +747,7 @@ function addPrimitive(type) {
   mesh.userData.primType = type;
   mesh.userData.primParams = params;
   const entry = registerObject(mesh, prettyName(type));
+  entry.treeNode = { kind: type, label: entry.name, primType: type, primParams: params, children: [] };
   logHistory(`Primitive créée : « ${entry.name} »`);
 }
 
@@ -910,6 +918,14 @@ function switchPanelTab(tab) {
   });
 }
 
+// Icons for the tree view — matches FreeCAD's spirit of showing objects,
+// then the features/operations performed on them.
+const TREE_ICONS = {
+  box: '🧊', cylinder: '🥫', sphere: '🔵', cone: '🔺',
+  extrude: '⬆', revolve: '🌀', pocket: '🕳️',
+  union: '⊕', subtract: '⊖', intersect: '⊗', primitive: '◆'
+};
+
 function renderObjectList() {
   const list = document.getElementById('obj-list');
   document.getElementById('status-right').textContent = `${objects.length} objet(s)`;
@@ -918,44 +934,91 @@ function renderObjectList() {
     return;
   }
   list.innerHTML = '';
+  const rows = [];
   objects.slice().reverse().forEach(o => {
-    const li = document.createElement('li');
-    if (selected === o) li.classList.add('selected');
-    const nameSpan = document.createElement('span');
-    nameSpan.className = 'name';
-    nameSpan.textContent = o.name;
-    nameSpan.addEventListener('click', () => selectObject(o));
-    const visBtn = document.createElement('button');
-    visBtn.textContent = o.mesh.visible ? '👁' : '🚫';
-    if (!o.mesh.visible) visBtn.classList.add('vis-off');
-    visBtn.addEventListener('click', (ev) => {
+    const fallbackNode = o.treeNode || { kind: 'primitive', label: o.name, children: [] };
+    buildTreeRows(fallbackNode, o, 0, rows);
+  });
+  rows.forEach(li => list.appendChild(li));
+}
+
+// Builds one <li> per tree node (the row itself, then recursively its
+// children if expanded) and pushes them, already flattened/indented, into
+// `out`. `liveEntry` is the actual selectable 3D object this row controls —
+// only set for a node's own top-level row; nested history children (past
+// operands consumed by a boolean) get liveEntry=null and render as inert
+// "ghost" rows, since their mesh no longer exists in the scene.
+function buildTreeRows(node, liveEntry, depth, out) {
+  const li = document.createElement('li');
+  li.className = 'tree-row';
+  if (liveEntry && selected === liveEntry) li.classList.add('selected');
+  if (!liveEntry) li.classList.add('ghost');
+  li.style.paddingLeft = (8 + depth * 18) + 'px';
+
+  const hasChildren = !!(node.children && node.children.length);
+  const toggle = document.createElement('span');
+  toggle.className = 'tree-toggle';
+  if (hasChildren) {
+    toggle.textContent = node.expanded === false ? '▸' : '▾';
+    toggle.addEventListener('click', (ev) => {
       ev.stopPropagation();
-      o.mesh.visible = !o.mesh.visible;
+      node.expanded = node.expanded === false ? true : false;
       renderObjectList();
     });
-    let editBtn = null;
-    if (o.sketchData) {
-      editBtn = document.createElement('button');
+  }
+  li.appendChild(toggle);
+
+  const icon = document.createElement('span');
+  icon.className = 'tree-icon';
+  icon.textContent = TREE_ICONS[node.kind] || '◆';
+  li.appendChild(icon);
+
+  const nameSpan = document.createElement('span');
+  nameSpan.className = 'name';
+  nameSpan.textContent = node.label;
+  if (liveEntry) nameSpan.addEventListener('click', () => selectObject(liveEntry));
+  li.appendChild(nameSpan);
+
+  if (liveEntry) {
+    const visBtn = document.createElement('button');
+    visBtn.textContent = liveEntry.mesh.visible ? '👁' : '🚫';
+    if (!liveEntry.mesh.visible) visBtn.classList.add('vis-off');
+    visBtn.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      liveEntry.mesh.visible = !liveEntry.mesh.visible;
+      renderObjectList();
+    });
+    li.appendChild(visBtn);
+
+    if (liveEntry.sketchData) {
+      const editBtn = document.createElement('button');
       editBtn.textContent = '✏️';
       editBtn.title = 'Modifier l\'esquisse';
-      editBtn.addEventListener('click', (ev) => {
-        ev.stopPropagation();
-        editObjectSketch(o);
-      });
+      editBtn.addEventListener('click', (ev) => { ev.stopPropagation(); editObjectSketch(liveEntry); });
+      li.appendChild(editBtn);
     }
+
     const delBtn = document.createElement('button');
     delBtn.textContent = '🗑';
     delBtn.addEventListener('click', (ev) => {
       ev.stopPropagation();
-      if (selected !== o) selectObject(o);
+      if (selected !== liveEntry) selectObject(liveEntry);
       deleteSelected();
     });
-    li.appendChild(nameSpan);
-    li.appendChild(visBtn);
-    if (editBtn) li.appendChild(editBtn);
     li.appendChild(delBtn);
-    list.appendChild(li);
-  });
+  } else if (node.primType || node.sketchData) {
+    // Ghost node (consumed by an earlier boolean) that we can still rebuild.
+    const recreateBtn = document.createElement('button');
+    recreateBtn.textContent = '🔁';
+    recreateBtn.title = 'Recréer cet objet séparément';
+    recreateBtn.addEventListener('click', (ev) => { ev.stopPropagation(); recreateFromTreeNode(node); });
+    li.appendChild(recreateBtn);
+  }
+
+  out.push(li);
+  if (hasChildren && node.expanded !== false) {
+    node.children.forEach(child => buildTreeRows(child, null, depth + 1, out));
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1574,7 +1637,7 @@ function setSketchTool(tool) {
   const map = { line: 'sk-line', rect: 'sk-rect', circle: 'sk-circle', edit: 'sk-edit', constrain: 'sk-constrain' };
   document.getElementById(map[tool]).classList.add('active');
   const hints = {
-    line: 'Touchez pour ajouter des points (accroche H/V auto = vraie contrainte). Tapez près du 1er point ou "Fermer" pour boucler.',
+    line: 'Touchez pour ajouter des points (accroche H/V auto = vraie contrainte). Tapez près du 1er point ou "Terminé" pour boucler.',
     rect: 'Touchez un 1er coin puis un 2ᵉ (ou glissez d\'un coin à l\'autre). Côtés auto-contraints horizontaux/verticaux.',
     circle: 'Touchez le centre puis un point sur le bord (ou glissez du centre vers le bord).',
     edit: 'Glissez un point existant : au relâchement, le solveur recalcule la géométrie selon les contraintes.',
@@ -2212,6 +2275,7 @@ function finishSketchResult(mesh, type, intent, param) {
     editingEntry.mesh.position.copy(mesh.position);
     editingEntry.mesh.quaternion.copy(mesh.quaternion);
     editingEntry.sketchData = sketchData;
+    if (editingEntry.treeNode) { editingEntry.treeNode.sketchData = sketchData; editingEntry.treeNode.label = editingEntry.name; }
     selectObject(editingEntry);
     renderObjectList();
     logHistory(`Esquisse modifiée : « ${editingEntry.name} » (${paramTxt})`);
@@ -2220,6 +2284,7 @@ function finishSketchResult(mesh, type, intent, param) {
 
   const newEntry = registerObject(mesh, prettyName(type));
   newEntry.sketchData = sketchData;
+  newEntry.treeNode = { kind: type, label: newEntry.name, sketchData, children: [] };
   const verb = type === 'pocket' ? 'Perçage' : type === 'revolve' ? 'Révolution' : 'Extrusion';
   logHistory(`${verb} créée : « ${newEntry.name} » (${paramTxt})`);
   if (parentEntry && objects.includes(parentEntry) && intent !== 'separate') {
@@ -2230,10 +2295,11 @@ function finishSketchResult(mesh, type, intent, param) {
 // Re-opens the sketch that produced a given object, restoring its entities
 // and constraints so it can be edited, then re-extruded/revolved to update
 // the object in place (see finishSketchResult).
-function editObjectSketch(entry) {
-  if (mode !== 'model') { flashHint('Terminez ou quittez l\'esquisse en cours d\'abord.'); return; }
-  const sd = entry.sketchData;
-  if (!sd) return;
+// Restores a saved sketchData snapshot into the live `sketch` state and
+// enters interactive sketch mode on its original plane. Shared by
+// editObjectSketch (edits a live object in place) and recreateFromTreeNode
+// (spins up a brand new, independent object from a history/ghost node).
+function restoreSketchDataAndEnter(sd, label) {
   const origin = new THREE.Vector3().fromArray(sd.plane.origin);
   const normal = new THREE.Vector3().fromArray(sd.plane.normal);
   const xAxis = new THREE.Vector3().fromArray(sd.plane.xAxis);
@@ -2242,7 +2308,7 @@ function editObjectSketch(entry) {
     origin, normal, xAxis, yAxis,
     threePlane: new THREE.Plane().setFromNormalAndCoplanarPoint(normal, origin),
     parentEntry: null,
-    label: 'modification de « ' + entry.name + ' »'
+    label
   };
   enterSketchModeOnPlane(plane);
   sketch.entities = new Map(sd.entities.map(e => [e.id, { ...e }]));
@@ -2254,417 +2320,30 @@ function editObjectSketch(entry) {
   }
   const allIds = [...sketch.entities.keys(), ...sketch.constraints.keys()].map(Number).filter(n => !isNaN(n));
   sketch.nextId = (allIds.length ? Math.max(...allIds) : 0) + 1;
-  sketch.editingEntry = entry;
-  document.getElementById('status-left').textContent = `Modification de « ${entry.name} »`;
   solveSketch();
 }
 
-// Single modal combining the numeric value (depth/segments) with the
-// pad/pocket/separate choice when relevant, instead of two sequential popups.
-function openExtrudeModal(opts) {
-  const wrap = document.getElementById('extrude-modal');
-  document.getElementById('em-title').textContent = opts.title;
-  document.getElementById('em-label').textContent = opts.valueLabel;
-  const input = document.getElementById('em-value');
-  input.value = opts.defaultVal;
-  document.getElementById('em-intent-row').style.display = opts.hasParent ? 'flex' : 'none';
-  document.getElementById('em-simple-row').style.display = opts.hasParent ? 'none' : 'flex';
-  wrap.classList.add('show');
-
-  const addBtn = document.getElementById('em-add');
-  const cutBtn = document.getElementById('em-cut');
-  const sepBtn = document.getElementById('em-separate');
-  const confirmBtn = document.getElementById('em-confirm');
-  const cancelBtn = document.getElementById('em-cancel');
-
-  function cleanup() {
-    wrap.classList.remove('show');
-    addBtn.removeEventListener('click', onAdd);
-    cutBtn.removeEventListener('click', onCut);
-    sepBtn.removeEventListener('click', onSep);
-    confirmBtn.removeEventListener('click', onConfirmSimple);
-    cancelBtn.removeEventListener('click', onCancel);
-  }
-  function getVal() { return parseFloat(input.value); }
-  function submit(intent) { const v = getVal(); cleanup(); if (!isNaN(v)) opts.onConfirm(v, intent); }
-  function onAdd() { submit('add'); }
-  function onCut() { submit('cut'); }
-  function onSep() { submit('separate'); }
-  function onConfirmSimple() { submit('separate'); }
-  function onCancel() { cleanup(); }
-
-  addBtn.addEventListener('click', onAdd);
-  cutBtn.addEventListener('click', onCut);
-  sepBtn.addEventListener('click', onSep);
-  confirmBtn.addEventListener('click', onConfirmSimple);
-  cancelBtn.addEventListener('click', onCancel);
+function editObjectSketch(entry) {
+  if (mode !== 'model') { flashHint('Terminez ou quittez l\'esquisse en cours d\'abord.'); return; }
+  const sd = entry.sketchData;
+  if (!sd) return;
+  restoreSketchDataAndEnter(sd, 'modification de « ' + entry.name + ' »');
+  sketch.editingEntry = entry;
+  document.getElementById('status-left').textContent = `Modification de « ${entry.name} »`;
 }
 
-
-
-function flashHint(msg) {
-  const hint = document.getElementById('hint');
-  hint.textContent = msg;
-  hint.style.color = '#ffd166';
-  setTimeout(() => { hint.style.color = ''; }, 1500);
-}
-
-// ---------------------------------------------------------------------------
-// Dimension input popup (used for extrude depth / revolve segments)
-// ---------------------------------------------------------------------------
-function openDimInput(label, defaultVal, onOk) {
-  const wrap = document.getElementById('dim-input');
-  document.getElementById('dim-label').textContent = label;
-  const input = document.getElementById('dim-value');
-  input.value = defaultVal;
-  wrap.classList.add('show');
-
-  const ok = document.getElementById('dim-ok');
-  const cancel = document.getElementById('dim-cancel');
-
-  function cleanup() {
-    wrap.classList.remove('show');
-    ok.removeEventListener('click', okHandler);
-    cancel.removeEventListener('click', cancelHandler);
-  }
-  function okHandler() {
-    const v = parseFloat(input.value);
-    cleanup();
-    if (!isNaN(v)) onOk(v);
-  }
-  function cancelHandler() { cleanup(); }
-
-  ok.addEventListener('click', okHandler);
-  cancel.addEventListener('click', cancelHandler);
-}
-
-// ---------------------------------------------------------------------------
-// Boolean operations
-// ---------------------------------------------------------------------------
-function startBoolean(op) {
-  if (objects.length < 2) { flashHint('Il faut au moins deux objets.'); return; }
-  pendingBoolean = op;
-  booleanFirst = null;
-  const labels = { union: 'Union', subtract: 'Soustraction', intersect: 'Intersection' };
-  document.getElementById('status-left').textContent = `${labels[op]} — touchez le 1er objet`;
-  document.getElementById('hint').textContent = `${labels[op]} : touchez le premier objet (base), puis le second.`;
-}
-
-function handleBooleanPick(entry) {
-  if (!booleanFirst) {
-    booleanFirst = entry;
-    document.getElementById('status-left').textContent = 'Touchez le 2ᵉ objet';
-    selectObject(entry);
-    return;
-  }
-  if (entry === booleanFirst) { flashHint('Choisissez un objet différent.'); return; }
-  performBoolean(booleanFirst, entry, pendingBoolean);
-  pendingBoolean = null;
-  booleanFirst = null;
-  document.getElementById('status-left').textContent = 'Mode modélisation';
-  document.getElementById('hint').textContent = '';
-}
-
-function performBoolean(a, b, op) {
-  a.mesh.updateMatrixWorld(true);
-  b.mesh.updateMatrixWorld(true);
-
-  const brushA = new Brush(a.mesh.geometry.clone());
-  brushA.position.copy(a.mesh.position);
-  brushA.rotation.copy(a.mesh.rotation);
-  brushA.scale.copy(a.mesh.scale);
-  brushA.updateMatrixWorld();
-
-  const brushB = new Brush(b.mesh.geometry.clone());
-  brushB.position.copy(b.mesh.position);
-  brushB.rotation.copy(b.mesh.rotation);
-  brushB.scale.copy(b.mesh.scale);
-  brushB.updateMatrixWorld();
-
-  const OP = op === 'union' ? ADDITION : op === 'subtract' ? SUBTRACTION : INTERSECTION;
-  let result;
-  try {
-    result = evaluator.evaluate(brushA, brushB, OP);
-  } catch (err) {
-    flashHint('Opération booléenne impossible sur ces formes.');
-    return;
-  }
-
-  // `result` is a Brush (extends THREE.Mesh) with the combined geometry already
-  // baked into world space by the evaluator — safe to use directly.
-  const mesh = result;
-  mesh.material = makeMaterial();
-
-  const aName = a.name, bName = b.name;
-  transformControls.detach();
-  scene.remove(a.mesh); a.mesh.geometry.dispose(); a.mesh.material.dispose();
-  scene.remove(b.mesh); b.mesh.geometry.dispose(); b.mesh.material.dispose();
-  objects = objects.filter(o => o !== a && o !== b);
-
-  const opLabels = { union: 'Union', subtract: 'Soustraction', intersect: 'Intersection' };
-  const opSign = { union: '+', subtract: '−', intersect: '∩' };
-  const newEntry = registerObject(mesh, prettyName(op));
-  logHistory(`${opLabels[op]} : « ${aName} » ${opSign[op]} « ${bName} » → « ${newEntry.name} »`);
-}
-
-// ---------------------------------------------------------------------------
-// STL export
-// ---------------------------------------------------------------------------
-function exportSTL() {
-  if (!objects.length) { flashHint('Rien à exporter.'); return; }
-  const exporter = new STLExporter();
-  const target = selected ? selected.mesh : new THREE.Group().add(...objects.map(o => o.mesh.clone()));
-  target.updateMatrixWorld(true);
-  const result = exporter.parse(target, { binary: true });
-  const blob = new Blob([result], { type: 'application/octet-stream' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = (selected ? selected.name : 'scene').replace(/\s+/g, '_') + '.stl';
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  setTimeout(() => URL.revokeObjectURL(url), 4000);
-}
-
-// ---------------------------------------------------------------------------
-// Save / Load (localStorage)
-// ---------------------------------------------------------------------------
-function saveProject() {
-  const data = objects.map(o => ({
-    name: o.name,
-    geometry: o.mesh.geometry.toJSON(),
-    position: o.mesh.position.toArray(),
-    rotation: o.mesh.rotation.toArray().slice(0, 3),
-    scale: o.mesh.scale.toArray(),
-    sketchData: o.sketchData || null,
-    primType: o.mesh.userData.primType || null,
-    primParams: o.mesh.userData.primParams || null
-  }));
-  try {
-    localStorage.setItem('minicad-project', JSON.stringify({ objects: data, history: historyLog }));
-    flashHint('Projet sauvegardé sur cet appareil (avec les esquisses).');
-    logHistory('— Projet sauvegardé —');
-  } catch (e) {
-    flashHint('Échec de la sauvegarde (stockage plein ?).');
-  }
-}
-
-function loadProject() {
-  const raw = localStorage.getItem('minicad-project');
-  if (!raw) { flashHint('Aucun projet sauvegardé.'); return; }
-  newProject(true);
-  const saved = JSON.parse(raw);
-  const data = Array.isArray(saved) ? saved : saved.objects; // back-compat with older saves
-  const loader = new THREE.BufferGeometryLoader();
-  data.forEach(d => {
-    const geo = loader.parse(d.geometry);
+// Rebuilds a tree/history node as a brand new, independent top-level object —
+// either instantly (primitives) or by re-opening its sketch so the user can
+// press Extruder/Révolution themselves (same review step as a fresh sketch).
+// This does NOT retroactively change the boolean result the node used to be
+// part of — it only lets you "resurrect" a past shape to work with again.
+function recreateFromTreeNode(node) {
+  if (mode !== 'model') { flashHint('Terminez ou quittez l\'esquisse en cours d\'abord.'); return; }
+  if (node.primType) {
+    const params = { ...node.primParams };
+    const geo = buildPrimitiveGeometry(node.primType, params);
     const mesh = new THREE.Mesh(geo, makeMaterial());
-    mesh.position.fromArray(d.position);
-    mesh.rotation.set(d.rotation[0], d.rotation[1], d.rotation[2]);
-    mesh.scale.fromArray(d.scale);
-    if (d.primType) { mesh.userData.primType = d.primType; mesh.userData.primParams = d.primParams; }
-    const entry = registerObject(mesh, d.name);
-    if (d.sketchData) entry.sketchData = d.sketchData;
-  });
-  if (!Array.isArray(saved) && saved.history) historyLog = saved.history;
-  flashHint('Projet chargé.');
-  logHistory(`— Projet chargé (${data.length} objet(s)) —`);
-}
-
-function newProject(silent) {
-  transformControls.detach();
-  objects.forEach(o => { scene.remove(o.mesh); o.mesh.geometry.dispose(); o.mesh.material.dispose(); });
-  objects = [];
-  selected = null;
-  nameCounters = {};
-  historyLog = [];
-  renderObjectList();
-  renderPropertiesPanel();
-  renderHistoryPanel();
-  if (!silent) { flashHint('Nouveau projet.'); logHistory('— Nouveau projet —'); }
-}
-
-// ---------------------------------------------------------------------------
-// UI wiring
-// ---------------------------------------------------------------------------
-function initUI() {
-  // Dropdown menus (Ajouter / Transformer / Booléen / Fichier)
-  const MENU_NAMES = ['add', 'transform', 'bool', 'file'];
-  const SK_MENU_NAMES = ['draw', 'actions', 'grid'];
-  function closeAllMenus() {
-    MENU_NAMES.forEach(n => document.getElementById('dropdown-' + n).classList.remove('show'));
-    SK_MENU_NAMES.forEach(n => document.getElementById('sk-dropdown-' + n).classList.remove('show'));
-    document.getElementById('prop-dropdown').classList.remove('show');
-    document.querySelectorAll('.menu-btn').forEach(b => b.classList.remove('open'));
-  }
-  function toggleMenu(name) {
-    const dd = document.getElementById('dropdown-' + name);
-    const isOpen = dd.classList.contains('show');
-    closeAllMenus();
-    if (!isOpen) {
-      dd.classList.add('show');
-      document.getElementById('menu-btn-' + name).classList.add('open');
-    }
-  }
-  function toggleSkMenu(name) {
-    const dd = document.getElementById('sk-dropdown-' + name);
-    const isOpen = dd.classList.contains('show');
-    closeAllMenus();
-    if (!isOpen) {
-      // Position it right below the sketch toolbar row (whose exact height
-      // varies with safe-area insets), computed live rather than hardcoded.
-      const bar = document.getElementById('sketch-toolbar');
-      dd.style.top = bar.getBoundingClientRect().bottom + 'px';
-      dd.classList.add('show');
-      document.getElementById('sk-menu-' + name).classList.add('open');
-    }
-  }
-  function togglePropDropdown() {
-    const dd = document.getElementById('prop-dropdown');
-    const isOpen = dd.classList.contains('show');
-    closeAllMenus();
-    if (!isOpen) {
-      // Drops down from the panel's tab row, spanning the panel's own width —
-      // computed live so it tracks the panel regardless of screen size.
-      const panelEl = document.getElementById('panel');
-      const tabsEl = document.getElementById('panel-tabs');
-      const panelRect = panelEl.getBoundingClientRect();
-      const tabsRect = tabsEl.getBoundingClientRect();
-      dd.style.top = tabsRect.bottom + 'px';
-      dd.style.left = panelRect.left + 'px';
-      dd.style.width = panelRect.width + 'px';
-      dd.classList.add('show');
-      document.getElementById('ptab-props-toggle').classList.add('open');
-    }
-  }
-  MENU_NAMES.forEach(n => {
-    document.getElementById('menu-btn-' + n).addEventListener('click', (e) => {
-      e.stopPropagation();
-      toggleMenu(n);
-    });
-  });
-  SK_MENU_NAMES.forEach(n => {
-    document.getElementById('sk-menu-' + n).addEventListener('click', (e) => {
-      e.stopPropagation();
-      toggleSkMenu(n);
-    });
-  });
-  document.getElementById('ptab-props-toggle').addEventListener('click', (e) => {
-    e.stopPropagation();
-    togglePropDropdown();
-  });
-  document.addEventListener('pointerdown', (e) => {
-    if (e.target.closest('.dropdown') || e.target.closest('.menu-btn')) return;
-    closeAllMenus();
-  });
-  // Any action button inside a dropdown closes the menu once tapped.
-  document.querySelectorAll('.dropdown button').forEach(btn => {
-    btn.addEventListener('click', closeAllMenus);
-  });
-
-  document.getElementById('add-box').addEventListener('click', () => addPrimitive('box'));
-  document.getElementById('add-cylinder').addEventListener('click', () => addPrimitive('cylinder'));
-  document.getElementById('add-sphere').addEventListener('click', () => addPrimitive('sphere'));
-  document.getElementById('add-cone').addEventListener('click', () => addPrimitive('cone'));
-
-  document.getElementById('btn-sketch').addEventListener('click', openPlaneChoice);
-  document.getElementById('btn-sketch-face').addEventListener('click', () => {
-    if (!objects.length) { flashHint('Créez d\'abord un objet.'); return; }
-    if (pickingFace) cancelFacePick(); else startFacePick();
-  });
-  document.getElementById('pc-ground').addEventListener('click', () => startPlaneSketch('ground'));
-  document.getElementById('pc-front').addEventListener('click', () => startPlaneSketch('front'));
-  document.getElementById('pc-side').addEventListener('click', () => startPlaneSketch('side'));
-  document.getElementById('pc-cancel').addEventListener('click', closePlaneChoice);
-
-  document.getElementById('btn-move').addEventListener('click', () => setTransformMode('translate'));
-  document.getElementById('btn-rotate').addEventListener('click', () => setTransformMode('rotate'));
-  document.getElementById('btn-scale').addEventListener('click', () => setTransformMode('scale'));
-
-  document.getElementById('btn-union').addEventListener('click', () => startBoolean('union'));
-  document.getElementById('btn-subtract').addEventListener('click', () => startBoolean('subtract'));
-  document.getElementById('btn-intersect').addEventListener('click', () => startBoolean('intersect'));
-
-  document.getElementById('btn-delete').addEventListener('click', deleteSelected);
-  document.getElementById('btn-export').addEventListener('click', exportSTL);
-  document.getElementById('btn-fit').addEventListener('click', fitView);
-
-  document.getElementById('btn-save').addEventListener('click', saveProject);
-  document.getElementById('btn-load').addEventListener('click', loadProject);
-  document.getElementById('btn-new').addEventListener('click', () => {
-    if (confirm('Effacer la scène actuelle ?')) newProject();
-  });
-
-  document.getElementById('panel-toggle').addEventListener('click', () => {
-    document.getElementById('panel').classList.toggle('hidden');
-    closeAllMenus();
-    // The panel toggle changes #viewport-wrap's available size without the
-    // window itself resizing, so the renderer/camera must be told explicitly —
-    // otherwise the WebGL canvas keeps its old resolution/aspect and looks wrong.
-    // Also re-assert the page's own size (see syncAppSize): this exact
-    // interaction has been observed to leave `100dvh` stuck at a stale value
-    // on Android Chrome, shrinking the whole app instead of just the canvas.
-    syncAppSize();
-    requestAnimationFrame(() => { syncAppSize(); onResize(); });
-  });
-
-  document.querySelectorAll('.ptab[data-tab]').forEach(btn => {
-    btn.addEventListener('click', () => switchPanelTab(btn.dataset.tab));
-  });
-
-  // Sketch toolbar
-  document.getElementById('sk-line').addEventListener('click', () => setSketchTool('line'));
-  document.getElementById('sk-rect').addEventListener('click', () => setSketchTool('rect'));
-  document.getElementById('sk-circle').addEventListener('click', () => setSketchTool('circle'));
-  document.getElementById('sk-edit').addEventListener('click', () => setSketchTool('edit'));
-  document.getElementById('sk-constrain').addEventListener('click', () => setSketchTool('constrain'));
-  document.getElementById('sk-finish').addEventListener('click', finishShape);
-  document.getElementById('sk-undo').addEventListener('click', undoPoint);
-  document.getElementById('sk-snap').addEventListener('click', () => {
-    sketch.snap = !sketch.snap;
-    document.getElementById('sk-snap').classList.toggle('active', sketch.snap);
-  });
-  document.getElementById('sk-gridstep').addEventListener('change', (e) => {
-    sketch.gridStep = parseFloat(e.target.value);
-    drawSketch();
-  });
-  document.getElementById('sk-dims').addEventListener('click', () => {
-    sketch.showDimensions = !sketch.showDimensions;
-    document.getElementById('sk-dims').classList.toggle('active', sketch.showDimensions);
-    drawSketch();
-  });
-  document.getElementById('sk-extrude').addEventListener('click', requestExtrude);
-  document.getElementById('sk-revolve').addEventListener('click', requestRevolve);
-  document.getElementById('sk-exit').addEventListener('click', () => {
-    exitSketchMode();
-  });
-
-  updateButtonStates();
-}
-
-function setTransformMode(m) {
-  if (!selected) { flashHint('Sélectionnez un objet d\'abord.'); return; }
-  transformControls.setMode(m);
-  ['btn-move', 'btn-rotate', 'btn-scale'].forEach(id => document.getElementById(id).classList.remove('active'));
-  const map = { translate: 'btn-move', rotate: 'btn-rotate', scale: 'btn-scale' };
-  document.getElementById(map[m]).classList.add('active');
-}
-
-function updateButtonStates() {
-  const has = !!selected;
-  ['btn-move', 'btn-rotate', 'btn-scale', 'btn-delete', 'btn-export'].forEach(id => {
-    document.getElementById(id).disabled = false; // export/boolean allowed generally; keep enabled, hints guide the user
-  });
-}
-
-</script>
-<script>
-  if ('serviceWorker' in navigator) {
-    window.addEventListener('load', () => {
-      navigator.serviceWorker.register('sw.js').catch(() => {});
-    });
-  }
-</script>
-</body>
-</html>
+    mesh.userData.primType = node.primType;
+    mesh.userData.primParams = params;
+    const entry = registerObject(mesh, prettyName(node.primType));
+    entry.treeNode = { kind: node.primType, label: entry.name, primType: node.primType, primParams: params, childr

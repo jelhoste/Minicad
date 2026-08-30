@@ -250,9 +250,139 @@
   @media (max-width:640px){
     #panel{ width:78vw; max-width:300px; }
   }
+
+  /* Debug/diagnostic helper — deliberately independent of the rest of the
+     app (plain DOM, no Three.js/module dependency) so it still works even
+     if the 3D scene or the solver fails to load entirely. */
+  #debug-copy-btn{
+    position:fixed; right:calc(14px + env(safe-area-inset-right)); bottom:calc(14px + env(safe-area-inset-bottom));
+    z-index:99999; width:44px; height:44px; border-radius:50%;
+    background:#1e2530; border:1px solid #2a3341; color:#8b98ab;
+    font-size:18px; display:flex; align-items:center; justify-content:center;
+    box-shadow:0 4px 14px rgba(0,0,0,.5); opacity:.55;
+  }
+  #debug-copy-btn:active{ opacity:1; }
+  #debug-toast{
+    position:fixed; left:50%; bottom:70px; transform:translateX(-50%); z-index:100000;
+    background:#1e2530; border:1px solid #4fd1c5; color:#e7ecf2; padding:8px 14px;
+    border-radius:10px; font-size:13px; display:none; box-shadow:0 4px 14px rgba(0,0,0,.5);
+  }
+  #debug-fallback-overlay{
+    position:fixed; inset:0; z-index:100001; background:rgba(0,0,0,.75);
+    display:none; align-items:center; justify-content:center; padding:20px;
+  }
+  #debug-fallback-overlay.show{ display:flex; }
+  #debug-fallback-box{
+    background:#1b212b; border:1px solid #2a3341; border-radius:12px; padding:14px;
+    max-width:600px; width:100%; max-height:80vh; display:flex; flex-direction:column; gap:10px;
+  }
+  #debug-fallback-box p{ color:#8b98ab; font-size:12.5px; margin:0; }
+  #debug-fallback-textarea{
+    flex:1; min-height:200px; background:#14181f; border:1px solid #2a3341; color:#e7ecf2;
+    border-radius:8px; padding:8px; font-size:11px; font-family:monospace; resize:vertical;
+  }
+  #debug-fallback-close{
+    align-self:flex-end; background:#232b38; border:1px solid #2a3341; color:#e7ecf2;
+    border-radius:8px; padding:8px 14px; font-size:13px;
+  }
 </style>
 </head>
 <body>
+
+<!-- Debug/diagnostic UI: plain HTML+JS, no framework/module dependency. -->
+<button id="debug-copy-btn" title="Copier les infos de débogage">🐞</button>
+<div id="debug-toast"></div>
+<div id="debug-fallback-overlay">
+  <div id="debug-fallback-box">
+    <p>La copie automatique n'a pas fonctionné. Sélectionnez tout le texte ci-dessous (déjà pré-sélectionné) et copiez-le manuellement.</p>
+    <textarea id="debug-fallback-textarea" readonly></textarea>
+    <button id="debug-fallback-close">Fermer</button>
+  </div>
+</div>
+<script>
+(function () {
+  var MAX_LOGS = 400;
+  window.__debugLog = [];
+  window.__minicadThreeLoaded = false;
+  window.__minicadGcsStatus = 'inconnu';
+
+  function fmt(a) {
+    if (a instanceof Error) return a.name + ': ' + a.message + (a.stack ? '\n' + a.stack : '');
+    if (typeof a === 'object' && a !== null) { try { return JSON.stringify(a); } catch (e) { return String(a); } }
+    return String(a);
+  }
+  function push(type, args) {
+    try {
+      var msg = Array.prototype.map.call(args, fmt).join(' ');
+      var t = new Date().toISOString().slice(11, 19);
+      window.__debugLog.push('[' + t + '] ' + type + ': ' + msg);
+      if (window.__debugLog.length > MAX_LOGS) window.__debugLog.shift();
+    } catch (e) { /* never let logging itself throw */ }
+  }
+  ['log', 'info', 'warn', 'error'].forEach(function (level) {
+    var orig = console[level] ? console[level].bind(console) : function () {};
+    console[level] = function () {
+      push(level, arguments);
+      orig.apply(console, arguments);
+    };
+  });
+  window.addEventListener('error', function (e) {
+    push('error', [(e.message || 'Erreur inconnue') + ' (' + (e.filename || '?') + ':' + (e.lineno || '?') + ':' + (e.colno || '?') + ')']);
+  });
+  window.addEventListener('unhandledrejection', function (e) {
+    push('unhandledrejection', [e.reason && e.reason.stack ? e.reason.stack : String(e.reason)]);
+  });
+  push('info', ['Debug logger initialisé.']);
+
+  function gatherDebugText() {
+    var lines = [];
+    lines.push('=== MiniCAD — rapport de débogage ===');
+    lines.push('Date : ' + new Date().toString());
+    lines.push('URL : ' + location.href);
+    lines.push('User-Agent : ' + navigator.userAgent);
+    lines.push('Fenêtre : ' + window.innerWidth + 'x' + window.innerHeight + ' (devicePixelRatio=' + window.devicePixelRatio + ')');
+    if (window.visualViewport) lines.push('visualViewport : ' + window.visualViewport.width + 'x' + window.visualViewport.height + ' scale=' + window.visualViewport.scale);
+    try {
+      var c = document.createElement('canvas');
+      var gl = c.getContext('webgl2') || c.getContext('webgl');
+      lines.push('WebGL : ' + (gl ? ('OK — ' + gl.getParameter(gl.VERSION)) : 'ABSENT (le rendu 3D ne peut pas fonctionner)'));
+    } catch (e) { lines.push('WebGL : erreur de test — ' + e.message); }
+    lines.push('Module principal chargé (Three.js) : ' + (window.__minicadThreeLoaded ? 'oui' : 'NON — le script a échoué avant de s\'exécuter (souvent un import CDN qui échoue)'));
+    lines.push('Solveur de contraintes (planegcs) : ' + window.__minicadGcsStatus);
+    lines.push('--- Journal (' + window.__debugLog.length + ' entrées) ---');
+    lines = lines.concat(window.__debugLog);
+    return lines.join('\n');
+  }
+
+  function showToast(msg) {
+    var t = document.getElementById('debug-toast');
+    t.textContent = msg;
+    t.style.display = 'block';
+    setTimeout(function () { t.style.display = 'none'; }, 2200);
+  }
+  function showFallback(text) {
+    var ta = document.getElementById('debug-fallback-textarea');
+    ta.value = text;
+    document.getElementById('debug-fallback-overlay').classList.add('show');
+    ta.focus();
+    ta.select();
+  }
+
+  document.getElementById('debug-copy-btn').addEventListener('click', function () {
+    var text = gatherDebugText();
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function () {
+        showToast('Copié — collez-le dans le chat.');
+      }).catch(function () { showFallback(text); });
+    } else {
+      showFallback(text);
+    }
+  });
+  document.getElementById('debug-fallback-close').addEventListener('click', function () {
+    document.getElementById('debug-fallback-overlay').classList.remove('show');
+  });
+})();
+</script>
 
 <header id="toolbar">
   <span class="brand">MiniCAD</span>
@@ -458,6 +588,11 @@ import { mergeGeometries as mergeGeoms } from 'three/addons/utils/BufferGeometry
 import { ADDITION, SUBTRACTION, INTERSECTION, Brush, Evaluator } from 'three-bvh-csg';
 import { make_gcs_wrapper, SolveStatus } from '@salusoft89/planegcs';
 
+// Signals to the (independent, non-module) debug button that the module
+// actually finished importing and started executing — if this never runs,
+// the failure is at the CDN import stage, not in our own logic.
+if (typeof window !== 'undefined') window.__minicadThreeLoaded = true;
+
 // ---------------------------------------------------------------------------
 // Global state
 // ---------------------------------------------------------------------------
@@ -568,6 +703,7 @@ async function initGcs() {
 
 function updateGcsStatusUI() {
   const el = document.getElementById('gcs-status');
+  window.__minicadGcsStatus = gcsStatus;
   if (!el) return;
   if (gcsStatus === 'loading') { el.textContent = '⏳ Solveur…'; el.className = 'gcs-status loading'; }
   else if (gcsStatus === 'ready') { el.textContent = '✓ Solveur prêt'; el.className = 'gcs-status ready'; }
